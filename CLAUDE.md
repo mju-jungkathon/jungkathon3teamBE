@@ -88,7 +88,7 @@ RUNNING_SESSIONS ── 1:0..1 ── RECOVERY_GUIDES ── 1:N ── RECOVERY
 
 ```
 jungkathon3team.aftergrow
-├── auth/       # 회원가입 ✔ (entity·repository·dto·service·controller) / 로그인·토큰 미구현
+├── auth/       # 회원가입·로그인 ✔ (entity·repository·dto·service·controller·jwt) / refresh·logout 미구현
 ├── home/       # 홈 대시보드
 ├── running/    # RunningSession, StretchingSession
 ├── heartrate/  # HeartRateMeasurement
@@ -122,11 +122,21 @@ jungkathon3team.aftergrow
 
 아직 없는 것:
 
-- `RedisConfig` — refresh token 저장 단계에서 필요해지면 추가. Boot가 `RedisTemplate`을 자동 구성하므로 직렬화 커스터마이징이 실제로 필요할 때까지는 불필요합니다.
-- 인증 — `POST /auth/signup` ✔ 완료. 다음은 `JwtTokenProvider` → `POST /auth/login` → `JwtAuthenticationFilter`(`OncePerRequestFilter`) → refresh/logout. **아직 토큰 발급이 없어서 `/auth/**`와 swagger 외 모든 경로는 통과할 방법이 없습니다.**
+- **`JwtAuthenticationFilter`** — 토큰 발급(`/auth/login`)은 되지만 **검증 필터가 없어 발급받은 토큰으로 아직 아무 데도 못 들어갑니다.** 다음 작업은 이것입니다.
+- `POST /auth/refresh`, `POST /auth/logout` — `RefreshTokenStore`에 조회/삭제 메서드를 추가해야 합니다(현재 `save`만 있음).
+- `RedisConfig` — `StringRedisTemplate` 자동 구성으로 충분해 아직 불필요합니다.
 - 이후 프로필 → 러닝 세션 → 심박수 → 회복 가이드 → 홈 대시보드(여러 도메인 종합이라 마지막) 순.
 
-JWT 관련 설정 키는 `application-local.yml`에 `jwt.secret` / `jwt.access-token-expiration-ms` / `jwt.refresh-token-expiration-ms`로 이미 자리를 잡아 뒀습니다(읽는 코드는 아직 없음).
+### JWT
+
+`jjwt 0.12.6`(HS256)을 씁니다. `auth/jwt/JwtTokenProvider`가 `application-local.yml`의 `jwt.secret` / `jwt.access-token-expiration-ms` / `jwt.refresh-token-expiration-ms`를 읽습니다.
+
+- **secret은 256비트(32자) 이상**이어야 합니다. 짧으면 기동 시점에 바로 실패합니다.
+- access/refresh는 `type` 클레임으로 구분되어 **서로 자리를 바꿔 쓸 수 없습니다.** 검증 실패(위조·만료·타입 불일치)는 전부 `E4010`으로 통일됩니다.
+- refresh 토큰은 `auth/repository/RefreshTokenStore`가 Redis에 `refresh:{userId}` 키로 저장합니다(TTL = refresh 만료). 사용자당 하나만 유지되어 재로그인 시 이전 토큰이 덮어써집니다.
+- **로그인 실패는 `E4011`이고, 이메일 없음과 비밀번호 불일치를 구분하지 않습니다.** 구분하면 가입된 이메일을 알아낼 수 있어서입니다. 이 동작은 테스트로 고정돼 있습니다.
+
+Redis를 쓰는 테스트는 `@Transactional`로 롤백되지 않습니다 — 테스트에서 직접 키를 지워야 합니다.
 
 에러 코드는 API 명세서의 `E4001`, `E4010`, `E4030` 형식을 enum으로 정의해 씁니다.
 

@@ -17,6 +17,8 @@ public enum ErrorCode {
 
     INVALID_REQUEST("E4001", HttpStatus.BAD_REQUEST, "요청 값이 유효하지 않습니다."),
     UNAUTHORIZED("E4010", HttpStatus.UNAUTHORIZED, "인증 토큰이 없거나 만료되었습니다."),
+    // 이메일 없음과 비밀번호 불일치를 구분하지 않습니다. 구분하면 가입 여부를 알아낼 수 있습니다.
+    INVALID_CREDENTIALS("E4011", HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
     FORBIDDEN("E4030", HttpStatus.FORBIDDEN, "권한이 없습니다."),
     NOT_FOUND("E4040", HttpStatus.NOT_FOUND, "요청한 리소스를 찾을 수 없습니다."),
     RUNNING_SESSION_ALREADY_IN_PROGRESS("E4090", HttpStatus.CONFLICT, "이미 진행 중인 러닝 세션이 있습니다."),

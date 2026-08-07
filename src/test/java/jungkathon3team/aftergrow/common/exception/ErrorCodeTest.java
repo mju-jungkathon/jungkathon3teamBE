@@ -19,6 +19,7 @@ class ErrorCodeTest {
                 .containsExactlyInAnyOrder(
                         tuple("E4001", HttpStatus.BAD_REQUEST),
                         tuple("E4010", HttpStatus.UNAUTHORIZED),
+                        tuple("E4011", HttpStatus.UNAUTHORIZED),
                         tuple("E4030", HttpStatus.FORBIDDEN),
                         tuple("E4040", HttpStatus.NOT_FOUND),
                         tuple("E4090", HttpStatus.CONFLICT),

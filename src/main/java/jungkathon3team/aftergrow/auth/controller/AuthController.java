@@ -3,6 +3,8 @@ package jungkathon3team.aftergrow.auth.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jungkathon3team.aftergrow.auth.dto.LoginRequest;
+import jungkathon3team.aftergrow.auth.dto.LoginResponse;
 import jungkathon3team.aftergrow.auth.dto.SignupRequest;
 import jungkathon3team.aftergrow.auth.dto.SignupResponse;
 import jungkathon3team.aftergrow.auth.service.AuthService;
@@ -28,5 +30,12 @@ public class AuthController {
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<SignupResponse> signup(@Valid @RequestBody SignupRequest request) {
         return ApiResponse.ok(authService.signup(request));
+    }
+
+    @Operation(summary = "로그인",
+            description = "이메일 또는 비밀번호가 틀리면 401(E4011)을 반환합니다. 둘을 구분하지 않습니다.")
+    @PostMapping("/login")
+    public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
+        return ApiResponse.ok(authService.login(request));
     }
 }
