@@ -119,6 +119,29 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.error.message").value("이메일 형식이 올바르지 않습니다."));
     }
 
+    /** 클라이언트가 깨진 본문을 보낸 것이므로 500이 아니라 400이어야 합니다. */
+    @Test
+    void 깨진_JSON_본문은_400과_E4001을_반환한다() throws Exception {
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"a@b.com\",\"password\":"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("E4001"));
+    }
+
+    @Test
+    void UTF_8이_아닌_바이트가_섞인_본문은_400과_E4001을_반환한다() throws Exception {
+        byte[] invalidUtf8 = new byte[]{
+                '{', '"', 'n', 'i', 'c', 'k', 'n', 'a', 'm', 'e', '"', ':', '"',
+                (byte) 0xB1, (byte) 0xE8, '"', '}'};
+
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(invalidUtf8))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("E4001"));
+    }
+
     @Test
     void 비밀번호가_8자_미만이면_400과_E4001을_반환한다() throws Exception {
         mockMvc.perform(post("/auth/signup")
