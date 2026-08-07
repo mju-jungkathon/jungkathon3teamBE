@@ -23,8 +23,18 @@ public class SecurityConfig {
     private final SecurityExceptionHandler securityExceptionHandler;
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
+    /**
+     * 로그인 전에도 호출해야 하는 경로만 엽니다.
+     * <p>
+     * {@code /auth/**} 와일드카드를 쓰지 않는 이유: {@code /auth/logout}은 누구를 로그아웃시킬지
+     * 알아야 하므로 인증이 필요합니다. 와일드카드로 열어두면 토큰 없이 호출됐을 때
+     * {@code @AuthenticationPrincipal}이 null로 들어옵니다. 앞으로 추가되는 {@code /auth/*}
+     * 엔드포인트도 실수로 공개되지 않도록 명시적으로 나열합니다.
+     */
     private static final String[] PUBLIC_PATHS = {
-            "/auth/**",
+            "/auth/signup",
+            "/auth/login",
+            "/auth/refresh",
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/v3/api-docs/**",

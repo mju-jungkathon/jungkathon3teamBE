@@ -7,15 +7,20 @@ import jungkathon3team.aftergrow.auth.dto.LoginRequest;
 import jungkathon3team.aftergrow.auth.dto.LoginResponse;
 import jungkathon3team.aftergrow.auth.dto.SignupRequest;
 import jungkathon3team.aftergrow.auth.dto.SignupResponse;
+import jungkathon3team.aftergrow.auth.dto.TokenRefreshRequest;
+import jungkathon3team.aftergrow.auth.dto.TokenRefreshResponse;
 import jungkathon3team.aftergrow.auth.service.AuthService;
 import jungkathon3team.aftergrow.common.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.UUID;
 
 @Tag(name = "인증", description = "회원가입 / 로그인 / 토큰")
 @RestController
@@ -37,5 +42,20 @@ public class AuthController {
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.ok(authService.login(request));
+    }
+
+    @Operation(summary = "access 토큰 재발급",
+            description = "로그아웃했거나 재로그인으로 교체된 refresh 토큰은 서명이 유효해도 401(E4010)입니다.")
+    @PostMapping("/refresh")
+    public ApiResponse<TokenRefreshResponse> refresh(@Valid @RequestBody TokenRefreshRequest request) {
+        return ApiResponse.ok(authService.refresh(request));
+    }
+
+    @Operation(summary = "로그아웃",
+            description = "저장된 refresh 토큰을 삭제합니다. 이미 발급된 access 토큰은 만료 전까지 유효합니다.")
+    @PostMapping("/logout")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void logout(@AuthenticationPrincipal UUID userId) {
+        authService.logout(userId);
     }
 }
