@@ -21,7 +21,13 @@ docker compose up -d          # PostgreSQL + Redis (실행 필수, 아래 참고
 
 **`test`/`build`는 Docker 컨테이너가 떠 있어야 통과합니다.** `contextLoads()`가 `@SpringBootTest`로 실제 PostgreSQL에 붙기 때문에 컨테이너 없이 돌리면 HibernateException으로 실패합니다. 빌드 실패 시 가장 먼저 `docker compose ps`로 postgres/redis가 healthy인지 확인하세요.
 
-현재 테스트는 `AftergrowApplicationTests.contextLoads()` 하나뿐입니다. `User`/`UserRepository` 테스트는 아직 없습니다. 테스트 프로파일(`application-test.yml`)도 없어서 CI는 환경변수로만 주입합니다.
+테스트는 29개입니다. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
+
+CI 환경을 로컬에서 재현하려면 (프로파일별로 설정이 달라 한쪽만 통과하는 일이 생깁니다):
+
+```bash
+SPRING_PROFILES_ACTIVE=test SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/aftergrow_test SPRING_DATASOURCE_USERNAME=dev SPRING_DATASOURCE_PASSWORD=... SPRING_DATA_REDIS_HOST=localhost ./gradlew cleanTest test
+```
 
 - 서버: http://localhost:8080 / Swagger UI: http://localhost:8080/swagger-ui.html
 - Swagger와 `/auth/**`는 인증 없이 열려 있습니다(`common/config/SecurityConfig`의 `PUBLIC_PATHS`). 그 외 모든 경로는 인증이 필요하며, 아직 `JwtAuthenticationFilter`가 없어서 **현재는 인증 수단 자체가 없으므로 전부 401**입니다.
@@ -31,7 +37,11 @@ docker compose up -d          # PostgreSQL + Redis (실행 필수, 아래 참고
 
 `application.yml`에는 앱 이름과 활성 프로파일(`local`)만 있고, **실제 datasource/redis/jwt 설정은 전부 `application-local.yml`에 있습니다. 이 파일은 `.env`와 함께 gitignore 대상입니다** — 클론 직후에는 존재하지 않으므로 직접 만들어야 하고, 값은 `.env`(원본은 `.env.example`)와 일치시켜야 합니다. 설정 키를 추가할 때는 `.env.example`에도 항목 이름을 추가해 두세요.
 
-CI(`.github/workflows/test.yml`)는 `SPRING_PROFILES_ACTIVE=test` + 환경변수로 주입하며, `application-test.yml`은 아직 없습니다.
+CI(`.github/workflows/test.yml`)는 `SPRING_PROFILES_ACTIVE=test`로 돌고, **datasource/redis 접속 정보만 환경변수로 주입**합니다. 나머지(`jwt.*`, `ddl-auto`, flyway)는 커밋되는 `src/test/resources/application-test.yml`에 있습니다.
+
+> ⚠️ **설정 키를 추가할 때는 `application-local.yml`과 `application-test.yml` 양쪽에 넣으세요.** local에만 넣으면 로컬 테스트는 통과하고 CI만 `PlaceholderResolutionException`으로 죽습니다. 실제로 `jwt.*`에서 한 번 겪었습니다.
+
+`gradlew`는 git에 `100755`로 기록돼 있어야 합니다. Windows는 `core.fileMode=false`라 권한 비트를 무시하므로, 실수로 `100644`가 되면 로컬에선 멀쩡하고 Ubuntu 러너에서만 `Permission denied`(exit 126)로 죽습니다. `git ls-files -s gradlew`로 확인하고 `git update-index --chmod=+x gradlew`로 고칩니다.
 
 ## 아키텍처
 

@@ -1,0 +1,21 @@
+# CI(test 프로파일) 전용 설정입니다.
+#
+# datasource / redis 접속 정보는 .github/workflows/test.yml이 환경변수
+# (SPRING_DATASOURCE_URL 등)로 주입하므로 여기에 두지 않습니다.
+# 반면 jwt.* 는 application-local.yml에만 있었고 그 파일은 gitignore 대상이라
+# CI에서 값을 찾지 못해 컨텍스트가 뜨지 않았습니다. 그래서 여기에 둡니다.
+spring:
+  jpa:
+    hibernate:
+      # 엔티티와 Flyway 스키마가 어긋나면 CI에서 바로 잡히도록 local과 동일하게 validate
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+jwt:
+  # 테스트 전용 더미 값입니다. 실제 환경의 secret과 무관하며 절대 재사용하지 마세요.
+  # HS256은 256비트(32자) 이상을 요구합니다.
+  secret: test-only-secret-key-not-used-anywhere-else-1234567890
+  access-token-expiration-ms: 3600000
+  refresh-token-expiration-ms: 2592000000
