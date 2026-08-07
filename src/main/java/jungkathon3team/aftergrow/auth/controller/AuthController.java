@@ -1,6 +1,7 @@
 package jungkathon3team.aftergrow.auth.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jungkathon3team.aftergrow.auth.dto.LoginRequest;
@@ -30,6 +31,7 @@ public class AuthController {
 
     private final AuthService authService;
 
+    @SecurityRequirements   // 로그인 전에 호출하므로 토큰 불필요
     @Operation(summary = "회원가입", description = "이메일 중복 시 409(E4091)를 반환합니다.")
     @PostMapping("/signup")
     @ResponseStatus(HttpStatus.CREATED)
@@ -37,6 +39,7 @@ public class AuthController {
         return ApiResponse.ok(authService.signup(request));
     }
 
+    @SecurityRequirements
     @Operation(summary = "로그인",
             description = "이메일 또는 비밀번호가 틀리면 401(E4011)을 반환합니다. 둘을 구분하지 않습니다.")
     @PostMapping("/login")
@@ -44,6 +47,7 @@ public class AuthController {
         return ApiResponse.ok(authService.login(request));
     }
 
+    @SecurityRequirements   // refreshToken을 본문으로 받으므로 헤더 인증 불필요
     @Operation(summary = "access 토큰 재발급",
             description = "로그아웃했거나 재로그인으로 교체된 refresh 토큰은 서명이 유효해도 401(E4010)입니다.")
     @PostMapping("/refresh")

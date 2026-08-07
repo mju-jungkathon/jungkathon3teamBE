@@ -30,6 +30,7 @@ SPRING_PROFILES_ACTIVE=test SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:54
 ```
 
 - 서버: http://localhost:8080 / Swagger UI: http://localhost:8080/swagger-ui.html
+- Swagger에서 인증이 필요한 API를 호출하려면 우측 상단 **Authorize**에 로그인 응답의 `accessToken`을 넣으세요(refreshToken 아님). 설정은 `common/config/OpenApiConfig`에 있고 **전역으로 걸려 있어**, 토큰 없이 호출하는 엔드포인트에는 `@SecurityRequirements`(복수형, 빈 값)를 붙여 해제합니다.
 - 공개 경로는 `SecurityConfig`의 `PUBLIC_PATHS`에 **명시적으로 나열**돼 있습니다(`/auth/signup`, `/auth/login`, `/auth/refresh`, swagger). 그 외는 `Authorization: Bearer {accessToken}`이 필요합니다. **`/auth/**` 와일드카드를 쓰지 마세요** — `/auth/logout`은 인증이 필요한데 와일드카드로 열면 `@AuthenticationPrincipal`이 null로 들어옵니다.
 - lint/formatter 설정 없음(`.editorconfig`, checkstyle, spotless 모두 없음).
 
