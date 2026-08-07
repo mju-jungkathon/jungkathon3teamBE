@@ -88,7 +88,7 @@ RUNNING_SESSIONS ── 1:0..1 ── RECOVERY_GUIDES ── 1:N ── RECOVERY
 
 ```
 jungkathon3team.aftergrow
-├── auth/       # 회원가입/로그인/토큰 (User, UserRepository ✔ / controller·service·dto 미구현)
+├── auth/       # 회원가입 ✔ (entity·repository·dto·service·controller) / 로그인·토큰 미구현
 ├── home/       # 홈 대시보드
 ├── running/    # RunningSession, StretchingSession
 ├── heartrate/  # HeartRateMeasurement
@@ -101,7 +101,8 @@ jungkathon3team.aftergrow
 
 `User`가 기준 패턴입니다: `@Getter @Builder @NoArgsConstructor(PROTECTED) @AllArgsConstructor(PRIVATE)`, setter 없음, 생성 시각은 `@PrePersist`.
 
-- 시각 필드는 `LocalDateTime` (DB는 `TIMESTAMP`). 문서 예시에 `Instant`가 보이면 코드 쪽을 따르세요
+- 시각 필드는 `LocalDateTime` (DB는 `TIMESTAMP`). 문서 예시에 `Instant`가 보이면 코드 쪽을 따르세요.
+  응답 JSON에 **타임존 오프셋이 붙지 않습니다**(`"2026-08-07T16:22:15.4986088"`). 명세서 예시는 `+09:00`이 붙어 있는데 실제와 다르며, 오프셋이 필요하면 `OffsetDateTime` + `TIMESTAMPTZ` 마이그레이션이 필요합니다. `AuthControllerTest`가 현재 형식을 고정하고 있습니다
 - 연관관계는 항상 `fetch = FetchType.LAZY`
 - Enum은 항상 `@Enumerated(EnumType.STRING)`
 
@@ -122,7 +123,7 @@ jungkathon3team.aftergrow
 아직 없는 것:
 
 - `RedisConfig` — refresh token 저장 단계에서 필요해지면 추가. Boot가 `RedisTemplate`을 자동 구성하므로 직렬화 커스터마이징이 실제로 필요할 때까지는 불필요합니다.
-- 인증 — `POST /auth/signup`(BCrypt, `PasswordEncoder` 빈은 이미 있음) → `JwtTokenProvider` → `POST /auth/login` → `JwtAuthenticationFilter`(`OncePerRequestFilter`) → refresh/logout. 인증이 막히면 나머지 API가 전부 막히므로 최우선입니다.
+- 인증 — `POST /auth/signup` ✔ 완료. 다음은 `JwtTokenProvider` → `POST /auth/login` → `JwtAuthenticationFilter`(`OncePerRequestFilter`) → refresh/logout. **아직 토큰 발급이 없어서 `/auth/**`와 swagger 외 모든 경로는 통과할 방법이 없습니다.**
 - 이후 프로필 → 러닝 세션 → 심박수 → 회복 가이드 → 홈 대시보드(여러 도메인 종합이라 마지막) 순.
 
 JWT 관련 설정 키는 `application-local.yml`에 `jwt.secret` / `jwt.access-token-expiration-ms` / `jwt.refresh-token-expiration-ms`로 이미 자리를 잡아 뒀습니다(읽는 코드는 아직 없음).
