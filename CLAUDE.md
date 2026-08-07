@@ -30,7 +30,8 @@ SPRING_PROFILES_ACTIVE=test SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:54
 ```
 
 - 서버: http://localhost:8080 / Swagger UI: http://localhost:8080/swagger-ui.html
-- Swagger와 `/auth/**`는 인증 없이 열려 있습니다(`common/config/SecurityConfig`의 `PUBLIC_PATHS`). 그 외 경로는 `Authorization: Bearer {accessToken}`이 필요합니다.
+- Swagger에서 인증이 필요한 API를 호출하려면 우측 상단 **Authorize**에 로그인 응답의 `accessToken`을 넣으세요(refreshToken 아님). 설정은 `common/config/OpenApiConfig`에 있고 **전역으로 걸려 있어**, 토큰 없이 호출하는 엔드포인트에는 `@SecurityRequirements`(복수형, 빈 값)를 붙여 해제합니다.
+- 공개 경로는 `SecurityConfig`의 `PUBLIC_PATHS`에 **명시적으로 나열**돼 있습니다(`/auth/signup`, `/auth/login`, `/auth/refresh`, swagger). 그 외는 `Authorization: Bearer {accessToken}`이 필요합니다. **`/auth/**` 와일드카드를 쓰지 마세요** — `/auth/logout`은 인증이 필요한데 와일드카드로 열면 `@AuthenticationPrincipal`이 null로 들어옵니다.
 - lint/formatter 설정 없음(`.editorconfig`, checkstyle, spotless 모두 없음).
 
 ## 설정 구조
@@ -98,7 +99,7 @@ RUNNING_SESSIONS ── 1:0..1 ── RECOVERY_GUIDES ── 1:N ── RECOVERY
 
 ```
 jungkathon3team.aftergrow
-├── auth/       # 회원가입·로그인 ✔ (entity·repository·dto·service·controller·jwt) / refresh·logout 미구현
+├── auth/       # 회원가입·로그인·재발급·로그아웃 ✔ (인증 도메인 완료)
 ├── home/       # 홈 대시보드
 ├── running/    # RunningSession, StretchingSession
 ├── heartrate/  # HeartRateMeasurement
@@ -132,7 +133,6 @@ jungkathon3team.aftergrow
 
 아직 없는 것:
 
-- `POST /auth/refresh`, `POST /auth/logout` — `RefreshTokenStore`에 조회/삭제 메서드를 추가해야 합니다(현재 `save`만 있음).
 - **도메인 API 전체** — 홈, 러닝, 심박수, 회복 가이드, 프로필. 인증 기반이 완성됐으니 여기부터 반복 확장하면 됩니다.
 - `RedisConfig` — `StringRedisTemplate` 자동 구성으로 충분해 아직 불필요합니다.
 - 이후 프로필 → 러닝 세션 → 심박수 → 회복 가이드 → 홈 대시보드(여러 도메인 종합이라 마지막) 순.
@@ -144,6 +144,8 @@ jungkathon3team.aftergrow
 - **secret은 256비트(32자) 이상**이어야 합니다. 짧으면 기동 시점에 바로 실패합니다.
 - access/refresh는 `type` 클레임으로 구분되어 **서로 자리를 바꿔 쓸 수 없습니다.** 검증 실패(위조·만료·타입 불일치)는 전부 `E4010`으로 통일됩니다.
 - refresh 토큰은 `auth/repository/RefreshTokenStore`가 Redis에 `refresh:{userId}` 키로 저장합니다(TTL = refresh 만료). 사용자당 하나만 유지되어 재로그인 시 이전 토큰이 덮어써집니다.
+- **`/auth/refresh`는 서명 검증만으로 통과시키지 않습니다.** Redis 저장값과 일치해야 합니다(`matches`). 이 검사가 로그아웃을 실제로 동작하게 하는 유일한 지점이라 절대 빼면 안 됩니다 — 빼면 로그아웃해도 30일간 재발급이 됩니다.
+- 로그아웃은 Redis 키를 지울 뿐, **이미 발급된 access 토큰은 만료 전까지 유효**합니다. JWT는 취소할 수 없습니다.
 - **로그인 실패는 `E4011`이고, 이메일 없음과 비밀번호 불일치를 구분하지 않습니다.** 구분하면 가입된 이메일을 알아낼 수 있어서입니다. 이 동작은 테스트로 고정돼 있습니다.
 
 Redis를 쓰는 테스트는 `@Transactional`로 롤백되지 않습니다 — 테스트에서 직접 키를 지워야 합니다.

@@ -4,6 +4,8 @@ import jungkathon3team.aftergrow.auth.dto.LoginRequest;
 import jungkathon3team.aftergrow.auth.dto.LoginResponse;
 import jungkathon3team.aftergrow.auth.dto.SignupRequest;
 import jungkathon3team.aftergrow.auth.dto.SignupResponse;
+import jungkathon3team.aftergrow.auth.dto.TokenRefreshRequest;
+import jungkathon3team.aftergrow.auth.dto.TokenRefreshResponse;
 import jungkathon3team.aftergrow.auth.entity.User;
 import jungkathon3team.aftergrow.auth.jwt.JwtTokenProvider;
 import jungkathon3team.aftergrow.auth.repository.RefreshTokenStore;
@@ -63,5 +65,34 @@ public class AuthService {
                 jwtTokenProvider.createAccessToken(userId),
                 refreshToken,
                 jwtTokenProvider.getAccessTokenTtl().toSeconds());
+    }
+
+    /**
+     * refresh 토큰으로 access 토큰을 재발급합니다.
+     * <p>
+     * 서명 검증만으로는 부족합니다. 로그아웃했거나 다른 기기에서 재로그인한 토큰도 서명은 유효하기 때문에,
+     * Redis에 저장된 값과 일치하는지까지 확인해야 실제로 살아 있는 토큰인지 알 수 있습니다.
+     */
+    public TokenRefreshResponse refresh(TokenRefreshRequest request) {
+        // 서명·만료·타입(REFRESH) 검증. 실패하면 여기서 E4010.
+        UUID userId = jwtTokenProvider.parseRefreshToken(request.refreshToken());
+
+        if (!refreshTokenStore.matches(userId, request.refreshToken())) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+
+        return new TokenRefreshResponse(
+                jwtTokenProvider.createAccessToken(userId),
+                jwtTokenProvider.getAccessTokenTtl().toSeconds());
+    }
+
+    /**
+     * 저장된 refresh 토큰을 지워 재발급을 막습니다.
+     * <p>
+     * 이미 발급된 access 토큰은 만료 전까지 유효합니다. JWT는 취소할 수 없기 때문이며,
+     * access 수명을 1시간으로 짧게 잡은 이유가 이 창을 좁히기 위함입니다.
+     */
+    public void logout(UUID userId) {
+        refreshTokenStore.delete(userId);
     }
 }
