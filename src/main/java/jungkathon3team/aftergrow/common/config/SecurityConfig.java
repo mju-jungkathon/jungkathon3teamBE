@@ -1,5 +1,6 @@
 package jungkathon3team.aftergrow.common.config;
 
+import jungkathon3team.aftergrow.auth.jwt.JwtAuthenticationFilter;
 import jungkathon3team.aftergrow.common.exception.SecurityExceptionHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -12,6 +13,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
 @EnableWebSecurity
@@ -19,6 +21,7 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
 
     private final SecurityExceptionHandler securityExceptionHandler;
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
     private static final String[] PUBLIC_PATHS = {
             "/auth/**",
@@ -43,6 +46,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(PUBLIC_PATHS).permitAll()
                         .anyRequest().authenticated())
+                // 인가 판단 전에 토큰을 읽어 SecurityContext를 채워야 하므로 앞쪽에 배치
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }
 
