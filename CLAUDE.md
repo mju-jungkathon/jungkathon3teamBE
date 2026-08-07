@@ -24,7 +24,7 @@ docker compose up -d          # PostgreSQL + Redis (실행 필수, 아래 참고
 현재 테스트는 `AftergrowApplicationTests.contextLoads()` 하나뿐입니다. `User`/`UserRepository` 테스트는 아직 없습니다. 테스트 프로파일(`application-test.yml`)도 없어서 CI는 환경변수로만 주입합니다.
 
 - 서버: http://localhost:8080 / Swagger UI: http://localhost:8080/swagger-ui.html
-- **주의: `SecurityConfig`가 아직 없어서 Spring Security 기본값이 걸립니다.** 스타터만 올라가 있고 설정 클래스가 없으므로 Swagger UI를 포함한 모든 엔드포인트가 자동 생성 HTTP Basic 인증 뒤에 있습니다(계정 `user`, 비밀번호는 기동 로그에 출력). `common/config/SecurityConfig`를 만들기 전까지는 이 상태가 정상입니다.
+- Swagger와 `/auth/**`는 인증 없이 열려 있습니다(`common/config/SecurityConfig`의 `PUBLIC_PATHS`). 그 외 모든 경로는 인증이 필요하며, 아직 `JwtAuthenticationFilter`가 없어서 **현재는 인증 수단 자체가 없으므로 전부 401**입니다.
 - lint/formatter 설정 없음(`.editorconfig`, checkstyle, spotless 모두 없음).
 
 ## 설정 구조
@@ -40,6 +40,17 @@ CI(`.github/workflows/test.yml`)는 `SPRING_PROFILES_ACTIVE=test` + 환경변수
 - **Java 17 고정.** Java 21에서 springdoc-openapi와 Jackson 호환성 문제를 겪고 되돌린 결정입니다. `build.gradle` toolchain과 CI 워크플로 둘 다 17이어야 합니다.
 - **Spring Boot 4.0.7.** starter 이름이 Boot 3과 다릅니다 — `spring-boot-starter-web`이 아니라 `spring-boot-starter-webmvc`, 테스트도 `spring-boot-starter-*-test`로 스타터마다 쪼개져 있습니다. 의존성 추가 시 Boot 4 기준 이름을 확인하세요. springdoc은 Boot 4 호환인 3.x(`3.0.2`)를 씁니다.
 - Flyway는 `flyway-core` + `flyway-database-postgresql` + `spring-boot-starter-flyway`(Boot 4 자동설정용) 셋 다 필요합니다.
+
+#### Boot 4에서 패키지가 바뀐 것 (실제로 걸렸던 것들)
+
+Boot 3 기준 코드나 예제를 그대로 붙여넣으면 컴파일이 깨집니다. import를 추측하지 말고 확인하세요.
+
+| 대상 | Boot 3 (틀림) | Boot 4 (맞음) |
+|---|---|---|
+| Jackson | `com.fasterxml.jackson.databind.ObjectMapper` | **`tools.jackson.databind.ObjectMapper`** (Jackson 3.1.4). Jackson 2도 classpath에 있지만 Boot가 빈으로 등록하는 건 3입니다 — 2로 주입하면 `NoSuchBeanDefinitionException` |
+| MockMvc | `org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc` | **`org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc`** |
+
+Spring Security는 **7.0.6**, Spring Framework는 7.0.8입니다. 람다 DSL만 사용 가능합니다(`and()` 없음).
 
 ### 저장소 역할 분담
 
@@ -98,7 +109,21 @@ jungkathon3team.aftergrow
 
 ### 아직 없는 것 (구현 순서)
 
-`common/`이 통째로 비어 있습니다 — `ApiResponse<T>`, 에러코드 enum, `@ControllerAdvice`, `RedisConfig`, 그리고 **`SecurityConfig`(없으면 위에 적은 대로 모든 요청이 기본 Basic 인증에 막힙니다)**. 그다음 인증 — `POST /auth/signup`(BCrypt) → `JwtTokenProvider` → `POST /auth/login` → `JwtAuthenticationFilter`(`OncePerRequestFilter`) → refresh/logout. 인증이 막히면 나머지 API가 전부 막히므로 최우선입니다. 이후 프로필 → 러닝 세션 → 심박수 → 회복 가이드 → 홈 대시보드(여러 도메인 종합이라 마지막) 순.
+`common/`은 구현됐습니다 — `ApiResponse<T>`/`ApiError`, `ErrorCode` enum, `BusinessException`, `GlobalExceptionHandler`, `SecurityExceptionHandler`, `SecurityConfig`(+ `PasswordEncoder` 빈).
+
+**에러 응답은 두 경로로 나옵니다.** 컨트롤러 진입 후 예외는 `GlobalExceptionHandler`(`@RestControllerAdvice`)가, 시큐리티 필터 단계의 인증/인가 실패는 `SecurityExceptionHandler`가 처리합니다. 후자는 컨트롤러 전이라 `@ControllerAdvice`가 못 잡으므로 직접 JSON을 씁니다 — 응답 형식을 바꿀 때 **두 곳 다** 고쳐야 합니다.
+
+`ErrorCode`는 **API 명세서 §0 공통 에러 코드 표와 1:1로 대응**하며 `ErrorCodeTest`가 그 대응을 고정합니다. 명세서가 바뀌면 이 테스트부터 깨져야 합니다.
+
+코드는 대체로 `E{HTTP상태코드}{일련번호}`지만 `E5010`만 502를 가리켜 규칙에서 벗어납니다(명세서 기준, 오타 여부 미확인). **새 코드를 만들 때 규칙을 유추하지 말고 명세서 값을 쓰세요.**
+
+**응답은 성공/실패 모두 `ApiResponse`로 감쌉니다**(래퍼 A안). 명세서의 개별 엔드포인트 예시는 감싸지 않은 형태로 적혀 있는데, 그건 `data` 안쪽 내용으로 읽으면 됩니다. `success`/`data`/`error` 세 필드는 항상 존재합니다.
+
+아직 없는 것:
+
+- `RedisConfig` — refresh token 저장 단계에서 필요해지면 추가. Boot가 `RedisTemplate`을 자동 구성하므로 직렬화 커스터마이징이 실제로 필요할 때까지는 불필요합니다.
+- 인증 — `POST /auth/signup`(BCrypt, `PasswordEncoder` 빈은 이미 있음) → `JwtTokenProvider` → `POST /auth/login` → `JwtAuthenticationFilter`(`OncePerRequestFilter`) → refresh/logout. 인증이 막히면 나머지 API가 전부 막히므로 최우선입니다.
+- 이후 프로필 → 러닝 세션 → 심박수 → 회복 가이드 → 홈 대시보드(여러 도메인 종합이라 마지막) 순.
 
 JWT 관련 설정 키는 `application-local.yml`에 `jwt.secret` / `jwt.access-token-expiration-ms` / `jwt.refresh-token-expiration-ms`로 이미 자리를 잡아 뒀습니다(읽는 코드는 아직 없음).
 
