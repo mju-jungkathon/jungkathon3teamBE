@@ -5,9 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @Slf4j
 @RestControllerAdvice
@@ -39,6 +41,20 @@ public class GlobalExceptionHandler {
         log.debug("요청 본문 파싱 실패", e);
         return toResponse(ErrorCode.INVALID_REQUEST,
                 "요청 본문을 읽을 수 없습니다. JSON 형식과 UTF-8 인코딩을 확인하세요.");
+    }
+
+    /** 매핑된 핸들러가 없는 경로. 존재하지 않는 URL은 서버 오류가 아니라 404입니다. */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResource(NoResourceFoundException e) {
+        log.debug("존재하지 않는 경로: {}", e.getResourcePath());
+        return toResponse(ErrorCode.NOT_FOUND, ErrorCode.NOT_FOUND.getMessage());
+    }
+
+    /** 경로는 있지만 HTTP 메서드가 다른 경우. 이것도 클라이언트 잘못이라 4xx입니다. */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
+        log.debug("지원하지 않는 메서드: {}", e.getMethod());
+        return toResponse(ErrorCode.NOT_FOUND, "요청한 경로 또는 메서드를 찾을 수 없습니다.");
     }
 
     @ExceptionHandler(Exception.class)

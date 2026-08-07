@@ -30,7 +30,7 @@ SPRING_PROFILES_ACTIVE=test SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:54
 ```
 
 - 서버: http://localhost:8080 / Swagger UI: http://localhost:8080/swagger-ui.html
-- Swagger와 `/auth/**`는 인증 없이 열려 있습니다(`common/config/SecurityConfig`의 `PUBLIC_PATHS`). 그 외 모든 경로는 인증이 필요하며, 아직 `JwtAuthenticationFilter`가 없어서 **현재는 인증 수단 자체가 없으므로 전부 401**입니다.
+- Swagger와 `/auth/**`는 인증 없이 열려 있습니다(`common/config/SecurityConfig`의 `PUBLIC_PATHS`). 그 외 경로는 `Authorization: Bearer {accessToken}`이 필요합니다.
 - lint/formatter 설정 없음(`.editorconfig`, checkstyle, spotless 모두 없음).
 
 ## 설정 구조
@@ -132,8 +132,8 @@ jungkathon3team.aftergrow
 
 아직 없는 것:
 
-- **`JwtAuthenticationFilter`** — 토큰 발급(`/auth/login`)은 되지만 **검증 필터가 없어 발급받은 토큰으로 아직 아무 데도 못 들어갑니다.** 다음 작업은 이것입니다.
 - `POST /auth/refresh`, `POST /auth/logout` — `RefreshTokenStore`에 조회/삭제 메서드를 추가해야 합니다(현재 `save`만 있음).
+- **도메인 API 전체** — 홈, 러닝, 심박수, 회복 가이드, 프로필. 인증 기반이 완성됐으니 여기부터 반복 확장하면 됩니다.
 - `RedisConfig` — `StringRedisTemplate` 자동 구성으로 충분해 아직 불필요합니다.
 - 이후 프로필 → 러닝 세션 → 심박수 → 회복 가이드 → 홈 대시보드(여러 도메인 종합이라 마지막) 순.
 
@@ -147,6 +147,17 @@ jungkathon3team.aftergrow
 - **로그인 실패는 `E4011`이고, 이메일 없음과 비밀번호 불일치를 구분하지 않습니다.** 구분하면 가입된 이메일을 알아낼 수 있어서입니다. 이 동작은 테스트로 고정돼 있습니다.
 
 Redis를 쓰는 테스트는 `@Transactional`로 롤백되지 않습니다 — 테스트에서 직접 키를 지워야 합니다.
+
+**도메인 컨트롤러에서 로그인한 사용자를 받는 방법:**
+
+```java
+@GetMapping("/home")
+public ApiResponse<HomeResponse> home(@AuthenticationPrincipal UUID userId) { ... }
+```
+
+`JwtAuthenticationFilter`가 토큰에서 꺼내 `SecurityContext`에 넣은 값이라 **클라이언트가 위조할 수 없습니다.** userId를 요청 본문이나 쿼리 파라미터로 받지 마세요 — 남의 데이터를 조회할 수 있게 됩니다.
+
+필터는 **요청을 거절하지 않습니다.** 토큰이 없거나 잘못되면 아무것도 기록하지 않고 넘기고, 거절은 `SecurityConfig`의 인가 규칙과 `SecurityExceptionHandler`가 합니다. 그래야 잘못된 토큰이 딸려와도 permitAll 경로가 막히지 않습니다.
 
 에러 코드는 API 명세서의 `E4001`, `E4010`, `E4030` 형식을 enum으로 정의해 씁니다.
 
