@@ -21,7 +21,13 @@ docker compose up -d          # PostgreSQL + Redis (실행 필수, 아래 참고
 
 **`test`/`build`는 Docker 컨테이너가 떠 있어야 통과합니다.** `contextLoads()`가 `@SpringBootTest`로 실제 PostgreSQL에 붙기 때문에 컨테이너 없이 돌리면 HibernateException으로 실패합니다. 빌드 실패 시 가장 먼저 `docker compose ps`로 postgres/redis가 healthy인지 확인하세요.
 
-현재 테스트는 `AftergrowApplicationTests.contextLoads()` 하나뿐입니다. `User`/`UserRepository` 테스트는 아직 없습니다. 테스트 프로파일(`application-test.yml`)도 없어서 CI는 환경변수로만 주입합니다.
+테스트는 29개입니다. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
+
+CI 환경을 로컬에서 재현하려면 (프로파일별로 설정이 달라 한쪽만 통과하는 일이 생깁니다):
+
+```bash
+SPRING_PROFILES_ACTIVE=test SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/aftergrow_test SPRING_DATASOURCE_USERNAME=dev SPRING_DATASOURCE_PASSWORD=... SPRING_DATA_REDIS_HOST=localhost ./gradlew cleanTest test
+```
 
 - 서버: http://localhost:8080 / Swagger UI: http://localhost:8080/swagger-ui.html
 - Swagger와 `/auth/**`는 인증 없이 열려 있습니다(`common/config/SecurityConfig`의 `PUBLIC_PATHS`). 그 외 모든 경로는 인증이 필요하며, 아직 `JwtAuthenticationFilter`가 없어서 **현재는 인증 수단 자체가 없으므로 전부 401**입니다.
@@ -31,7 +37,11 @@ docker compose up -d          # PostgreSQL + Redis (실행 필수, 아래 참고
 
 `application.yml`에는 앱 이름과 활성 프로파일(`local`)만 있고, **실제 datasource/redis/jwt 설정은 전부 `application-local.yml`에 있습니다. 이 파일은 `.env`와 함께 gitignore 대상입니다** — 클론 직후에는 존재하지 않으므로 직접 만들어야 하고, 값은 `.env`(원본은 `.env.example`)와 일치시켜야 합니다. 설정 키를 추가할 때는 `.env.example`에도 항목 이름을 추가해 두세요.
 
-CI(`.github/workflows/test.yml`)는 `SPRING_PROFILES_ACTIVE=test` + 환경변수로 주입하며, `application-test.yml`은 아직 없습니다.
+CI(`.github/workflows/test.yml`)는 `SPRING_PROFILES_ACTIVE=test`로 돌고, **datasource/redis 접속 정보만 환경변수로 주입**합니다. 나머지(`jwt.*`, `ddl-auto`, flyway)는 커밋되는 `src/test/resources/application-test.yml`에 있습니다.
+
+> ⚠️ **설정 키를 추가할 때는 `application-local.yml`과 `application-test.yml` 양쪽에 넣으세요.** local에만 넣으면 로컬 테스트는 통과하고 CI만 `PlaceholderResolutionException`으로 죽습니다. 실제로 `jwt.*`에서 한 번 겪었습니다.
+
+`gradlew`는 git에 `100755`로 기록돼 있어야 합니다. Windows는 `core.fileMode=false`라 권한 비트를 무시하므로, 실수로 `100644`가 되면 로컬에선 멀쩡하고 Ubuntu 러너에서만 `Permission denied`(exit 126)로 죽습니다. `git ls-files -s gradlew`로 확인하고 `git update-index --chmod=+x gradlew`로 고칩니다.
 
 ## 아키텍처
 
@@ -88,7 +98,7 @@ RUNNING_SESSIONS ── 1:0..1 ── RECOVERY_GUIDES ── 1:N ── RECOVERY
 
 ```
 jungkathon3team.aftergrow
-├── auth/       # 회원가입 ✔ (entity·repository·dto·service·controller) / 로그인·토큰 미구현
+├── auth/       # 회원가입·로그인 ✔ (entity·repository·dto·service·controller·jwt) / refresh·logout 미구현
 ├── home/       # 홈 대시보드
 ├── running/    # RunningSession, StretchingSession
 ├── heartrate/  # HeartRateMeasurement
@@ -122,11 +132,21 @@ jungkathon3team.aftergrow
 
 아직 없는 것:
 
-- `RedisConfig` — refresh token 저장 단계에서 필요해지면 추가. Boot가 `RedisTemplate`을 자동 구성하므로 직렬화 커스터마이징이 실제로 필요할 때까지는 불필요합니다.
-- 인증 — `POST /auth/signup` ✔ 완료. 다음은 `JwtTokenProvider` → `POST /auth/login` → `JwtAuthenticationFilter`(`OncePerRequestFilter`) → refresh/logout. **아직 토큰 발급이 없어서 `/auth/**`와 swagger 외 모든 경로는 통과할 방법이 없습니다.**
+- **`JwtAuthenticationFilter`** — 토큰 발급(`/auth/login`)은 되지만 **검증 필터가 없어 발급받은 토큰으로 아직 아무 데도 못 들어갑니다.** 다음 작업은 이것입니다.
+- `POST /auth/refresh`, `POST /auth/logout` — `RefreshTokenStore`에 조회/삭제 메서드를 추가해야 합니다(현재 `save`만 있음).
+- `RedisConfig` — `StringRedisTemplate` 자동 구성으로 충분해 아직 불필요합니다.
 - 이후 프로필 → 러닝 세션 → 심박수 → 회복 가이드 → 홈 대시보드(여러 도메인 종합이라 마지막) 순.
 
-JWT 관련 설정 키는 `application-local.yml`에 `jwt.secret` / `jwt.access-token-expiration-ms` / `jwt.refresh-token-expiration-ms`로 이미 자리를 잡아 뒀습니다(읽는 코드는 아직 없음).
+### JWT
+
+`jjwt 0.12.6`(HS256)을 씁니다. `auth/jwt/JwtTokenProvider`가 `application-local.yml`의 `jwt.secret` / `jwt.access-token-expiration-ms` / `jwt.refresh-token-expiration-ms`를 읽습니다.
+
+- **secret은 256비트(32자) 이상**이어야 합니다. 짧으면 기동 시점에 바로 실패합니다.
+- access/refresh는 `type` 클레임으로 구분되어 **서로 자리를 바꿔 쓸 수 없습니다.** 검증 실패(위조·만료·타입 불일치)는 전부 `E4010`으로 통일됩니다.
+- refresh 토큰은 `auth/repository/RefreshTokenStore`가 Redis에 `refresh:{userId}` 키로 저장합니다(TTL = refresh 만료). 사용자당 하나만 유지되어 재로그인 시 이전 토큰이 덮어써집니다.
+- **로그인 실패는 `E4011`이고, 이메일 없음과 비밀번호 불일치를 구분하지 않습니다.** 구분하면 가입된 이메일을 알아낼 수 있어서입니다. 이 동작은 테스트로 고정돼 있습니다.
+
+Redis를 쓰는 테스트는 `@Transactional`로 롤백되지 않습니다 — 테스트에서 직접 키를 지워야 합니다.
 
 에러 코드는 API 명세서의 `E4001`, `E4010`, `E4030` 형식을 enum으로 정의해 씁니다.
 
