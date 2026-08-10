@@ -2,6 +2,10 @@ package jungkathon3team.aftergrow.heartrate.service;
 
 import jungkathon3team.aftergrow.common.exception.BusinessException;
 import jungkathon3team.aftergrow.common.exception.ErrorCode;
+import jungkathon3team.aftergrow.heartrate.dto.HeartRateRecordsResponse;
+import jungkathon3team.aftergrow.heartrate.entity.HeartRateMeasurement;
+import jungkathon3team.aftergrow.heartrate.entity.HeartRateSource;
+import jungkathon3team.aftergrow.heartrate.entity.SyncStatus;
 import jungkathon3team.aftergrow.heartrate.repository.HeartRateMeasurementRepository;
 import jungkathon3team.aftergrow.heartrate.repository.RppgSessionStore;
 import jungkathon3team.aftergrow.profile.repository.IntegrationStatusRepository;
@@ -11,6 +15,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -58,5 +64,38 @@ public class HeartRateMeasurementService {
         }
 
         return now.minusDays(days);
+    }
+
+    /**
+     * R6.1 GET /heart-rate-measurements?range=30d
+     * <p>sourceRatio는 별도 집계 쿼리 없이 조회된 목록을 세서 만든다(30일치면 많아야 수십 건).
+     */
+    public HeartRateRecordsResponse getRecords(UUID userId, String range) {
+        LocalDateTime since = sinceOf(range, LocalDateTime.now());
+
+        List<HeartRateMeasurement> measurements = heartRateMeasurementRepository
+                .findByRunningSession_User_UserIdAndMeasuredAtGreaterThanEqualOrderByMeasuredAtDesc(userId, since);
+
+        List<HeartRateRecordsResponse.Item> items = measurements.stream()
+                .map(HeartRateRecordsResponse.Item::from)
+                .toList();
+
+        return new HeartRateRecordsResponse(items, sourceRatioOf(measurements));
+    }
+
+    /** rppgFailedCount는 rppg에서 빠지는 값이 아니라 부분집합이다. */
+    private HeartRateRecordsResponse.SourceRatio sourceRatioOf(List<HeartRateMeasurement> measurements) {
+        long watch = measurements.stream()
+                .filter(m -> m.getHeartRateSource() == HeartRateSource.WATCH)
+                .count();
+        long rppg = measurements.stream()
+                .filter(m -> m.getHeartRateSource() == HeartRateSource.RPPG)
+                .count();
+        long rppgFailed = measurements.stream()
+                .filter(m -> m.getHeartRateSource() == HeartRateSource.RPPG)
+                .filter(m -> m.getSyncStatus() == SyncStatus.FAILED)
+                .count();
+
+        return new HeartRateRecordsResponse.SourceRatio(watch, rppg, rppgFailed);
     }
 }
