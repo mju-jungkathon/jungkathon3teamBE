@@ -619,7 +619,7 @@
     }
   ],
   "sourceRatio": {
-    "watch": 2,
+    "watch": 1,
     "rppg": 2,
     "rppgFailedCount": 1
   }
