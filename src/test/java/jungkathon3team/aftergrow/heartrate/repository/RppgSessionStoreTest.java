@@ -31,32 +31,39 @@ class RppgSessionStoreTest {
     }
 
     @Test
-    void 저장한_러닝_세션_id를_다시_꺼낼_수_있다() {
+    void 저장한_러닝_세션_id를_claim으로_꺼낼_수_있다() {
         rppgSessionStore.save(rppgSessionId, runningSessionId);
 
-        assertThat(rppgSessionStore.findRunningSessionId(rppgSessionId))
+        assertThat(rppgSessionStore.claimRunningSessionId(rppgSessionId))
                 .contains(runningSessionId);
     }
 
     @Test
-    void 저장하지_않은_id를_조회하면_비어_있다() {
-        assertThat(rppgSessionStore.findRunningSessionId(UUID.randomUUID()))
+    void 저장하지_않은_id를_claim하면_비어_있다() {
+        assertThat(rppgSessionStore.claimRunningSessionId(UUID.randomUUID()))
                 .isEmpty();
     }
 
-    /** 같은 rppgSessionId로 결과를 두 번 제출할 수 없어야 한다. */
+    /** claim은 GETDEL이라 조회와 동시에 키가 지워진다 — 같은 rppgSessionId로 두 번 제출할 수 없어야 한다. */
     @Test
-    void 삭제하면_더_이상_조회되지_않는다() {
+    void claim하면_키가_사라져_다시_조회되지_않는다() {
         rppgSessionStore.save(rppgSessionId, runningSessionId);
 
-        rppgSessionStore.delete(rppgSessionId);
+        rppgSessionStore.claimRunningSessionId(rppgSessionId);
 
-        assertThat(rppgSessionStore.findRunningSessionId(rppgSessionId)).isEmpty();
+        assertThat(rppgSessionStore.claimRunningSessionId(rppgSessionId)).isEmpty();
     }
 
+    /** 이중 제출 시나리오: 두 번째 claim은 반드시 빈 값이어야 중복 저장이 생기지 않는다. */
     @Test
-    void 없는_키를_삭제해도_조용히_넘어간다() {
-        rppgSessionStore.delete(UUID.randomUUID());
+    void 두_번째_claim은_항상_비어_있다() {
+        rppgSessionStore.save(rppgSessionId, runningSessionId);
+
+        var first = rppgSessionStore.claimRunningSessionId(rppgSessionId);
+        var second = rppgSessionStore.claimRunningSessionId(rppgSessionId);
+
+        assertThat(first).contains(runningSessionId);
+        assertThat(second).isEmpty();
     }
 
     /** 측정을 끝내지 않고 앱을 꺼도 키가 영원히 남지 않아야 한다. */

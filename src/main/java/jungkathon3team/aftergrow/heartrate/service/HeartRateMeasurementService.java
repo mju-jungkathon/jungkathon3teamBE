@@ -135,13 +135,15 @@ public class HeartRateMeasurementService {
      * R4.6 POST /heart-rate-measurements/rppg/{rppgSessionId}/result
      * <p>신호 품질이 POOR이면 FAILED로 저장된다(값을 버리는 판단은 엔티티가 한다).
      * 실패도 에러가 아니라 "재측정이 필요한 기록"이라 201로 응답한다.
-     * <p>Redis 키는 제출 후 삭제해 같은 rppgSessionId로 두 번 제출할 수 없게 한다.
+     * <p>Redis 키는 GETDEL로 원자적으로 조회·삭제한다(claimRunningSessionId).
+     * GET과 DEL을 따로 하면 그 사이 이중 제출이 끼어들어 측정 기록이 중복 저장될 수 있어,
+     * 조회와 삭제를 한 왕복으로 묶어야 같은 rppgSessionId로 두 번 제출할 수 없다.
      */
     @Transactional
     public HeartRateMeasurementResponse submitRppgResult(UUID userId,
                                                          UUID rppgSessionId,
                                                          RppgResultDto.Request request) {
-        UUID runningSessionId = rppgSessionStore.findRunningSessionId(rppgSessionId)
+        UUID runningSessionId = rppgSessionStore.claimRunningSessionId(rppgSessionId)
                 // 만료됐거나 이미 제출됐거나 애초에 없던 id. 어느 세션의 것인지 알 수 없어 404다.
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND)); // E4040
 
@@ -156,8 +158,6 @@ public class HeartRateMeasurementService {
                         request.measuredAt(),
                         request.signalQuality()
                 ));
-
-        rppgSessionStore.delete(rppgSessionId);
 
         return HeartRateMeasurementResponse.from(measurement);
     }
@@ -243,6 +243,9 @@ public class HeartRateMeasurementService {
      * 화면 5에서 기본으로 선택해 둘 측정 방식.
      * <p>명세에 없는 요구(최근 쓴 방식이 기본, 버튼으로 전환)를 위해 R3.5 /end 응답이 실어 보낸다.
      * 별도 컬럼 없이 측정 이력에서 파생하므로, 고르기만 하고 측정을 끝내지 않은 선택은 기억되지 않는다.
+     * <p>실패한 측정도 포함한 미필터 조회를 그대로 쓴다 — "최근에 그 방식을 골랐다"는 사실은
+     * 그 측정이 실패했어도 참이다. R2 홈 대시보드처럼 실제 성공 여부가 중요한 곳은
+     * SUCCESS로 필터한 별도 쿼리를 쓴다({@code findTopByRunningSession_User_UserIdAndSyncStatusOrderByMeasuredAtDesc}).
      */
     public HeartRateSource defaultSourceFor(UUID userId) {
         return heartRateMeasurementRepository

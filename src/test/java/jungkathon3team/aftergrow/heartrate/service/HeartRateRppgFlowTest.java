@@ -22,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -53,7 +54,7 @@ class HeartRateRppgFlowTest {
     private HeartRateMeasurementRepository heartRateMeasurementRepository;
 
     @Autowired
-    private RppgSessionStore rppgSessionStore;
+    private StringRedisTemplate redisTemplate;
 
     private UUID userId;
     private RunningSession session;
@@ -73,7 +74,7 @@ class HeartRateRppgFlowTest {
 
     @AfterEach
     void tearDown() {
-        issuedRppgSessionIds.forEach(rppgSessionStore::delete);
+        issuedRppgSessionIds.forEach(id -> redisTemplate.delete(RppgSessionStore.KEY_PREFIX + id));
     }
 
     private UUID startRppg() {

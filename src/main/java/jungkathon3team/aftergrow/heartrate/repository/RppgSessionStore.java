@@ -30,15 +30,15 @@ public class RppgSessionStore {
         redisTemplate.opsForValue().set(key(rppgSessionId), runningSessionId.toString(), TTL);
     }
 
-    /** 만료됐거나 애초에 없던 id면 비어 있습니다. 호출자는 E4040으로 응답합니다. */
-    public Optional<UUID> findRunningSessionId(UUID rppgSessionId) {
-        return Optional.ofNullable(redisTemplate.opsForValue().get(key(rppgSessionId)))
+    /**
+     * GETDEL로 조회와 삭제를 한 번의 Redis 왕복에 묶은 원자적 claim입니다.
+     * 더블 탭이나 타임아웃 재시도로 같은 rppgSessionId 제출이 동시에 들어와도 값을 가져가는 쪽은
+     * 하나뿐이라 측정 기록이 두 번 쌓이는 일이 원천적으로 불가능합니다. 만료됐거나 애초에 없던 id,
+     * 혹은 이미 다른 요청이 가져간 id면 비어 있습니다. 호출자는 E4040으로 응답합니다.
+     */
+    public Optional<UUID> claimRunningSessionId(UUID rppgSessionId) {
+        return Optional.ofNullable(redisTemplate.opsForValue().getAndDelete(key(rppgSessionId)))
                 .map(UUID::fromString);
-    }
-
-    /** 결과 제출 후 삭제합니다. 같은 rppgSessionId로 두 번 제출할 수 없게 하는 지점입니다. */
-    public void delete(UUID rppgSessionId) {
-        redisTemplate.delete(key(rppgSessionId));
     }
 
     private String key(UUID rppgSessionId) {
