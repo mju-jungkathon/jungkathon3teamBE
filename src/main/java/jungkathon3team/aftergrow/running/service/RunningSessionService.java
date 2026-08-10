@@ -4,6 +4,7 @@ import jungkathon3team.aftergrow.auth.entity.User;
 import jungkathon3team.aftergrow.auth.repository.UserRepository;
 import jungkathon3team.aftergrow.common.exception.BusinessException;
 import jungkathon3team.aftergrow.common.exception.ErrorCode;
+import jungkathon3team.aftergrow.heartrate.service.HeartRateMeasurementService;
 import jungkathon3team.aftergrow.running.dto.*;
 import jungkathon3team.aftergrow.running.entity.Intensity;
 import jungkathon3team.aftergrow.running.entity.RunningSession;
@@ -33,6 +34,7 @@ public class RunningSessionService {
     private final UserRepository userRepository;
     private final UvIndexClient uvIndexClient;
     private final LocationLabelResolver locationLabelResolver;
+    private final HeartRateMeasurementService heartRateMeasurementService;
 
     /** 3.1 GET /running-sessions/prepare */
     public RunningPrepareResponse prepare(double lat, double lng) {
@@ -118,7 +120,9 @@ public class RunningSessionService {
         return new RunningEndDto.Response(
                 session.getRunningSessionId(),
                 session.getStatus(),
-                RunningEndDto.Response.NEXT_STEP_HEART_RATE_CHECK
+                RunningEndDto.Response.NEXT_STEP_HEART_RATE_CHECK,
+                // 화면 5의 기본 선택지. 러닝 종료 → 화면 5 진입이 유일한 경로라 여기서 함께 내려준다.
+                heartRateMeasurementService.defaultSourceFor(userId)
         );
     }
 
