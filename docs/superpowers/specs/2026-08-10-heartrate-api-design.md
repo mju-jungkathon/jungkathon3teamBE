@@ -299,6 +299,8 @@ running/  (수정)
 
 소유자 검증 헬퍼(`getOwnedSession`)는 `RunningSessionService`와 `HeartRateMeasurementService`에 각각 둔다. private 헬퍼 3줄을 공유하려고 도메인 간 서비스 의존을 하나 더 만들지 않는다.
 
+> **제약: 서비스 간 의존은 한 방향으로만 흐른다.** 실제 구현에서는 `RunningSessionService`가 §2.4 기본 source 파생을 위해 `HeartRateMeasurementService`(리포지토리가 아니라 서비스)에 의존하게 됐고, 이 edge는 `RunningSessionService → HeartRateMeasurementService` 방향 하나뿐이다. 도메인 간 의존은 원칙적으로 리포지토리를 향해야 하고, 서비스→서비스 의존은 이 한 방향만 유지해야 한다 — `HeartRateMeasurementService`가 `RunningSessionService`를 필요로 하는 순간 순환이 생겨 Spring이 기동 시점에 `BeanCurrentlyInCreationException`으로 죽는다. `recovery` 도메인이 러닝과 심박수 양쪽을 다뤄야 하니 이 제약을 특히 주의한다.
+
 ### 5.1 엔티티 규약
 
 `User`/`RunningSession` 패턴을 따른다. `@Getter @Builder @NoArgsConstructor(PROTECTED) @AllArgsConstructor(PRIVATE)`, setter 없음.
