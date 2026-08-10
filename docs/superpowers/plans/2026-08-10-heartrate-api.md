@@ -1936,7 +1936,7 @@ import에 `HeartRateMeasurementResponse`, `RppgGuideResponse`, `RppgResultDto`, 
 ./gradlew test --tests '*HeartRateRppgFlowTest'
 ```
 
-Expected: PASS (16개).
+Expected: PASS (15개).
 
 - [ ] **Step 6: 커밋**
 
