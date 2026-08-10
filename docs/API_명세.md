@@ -380,9 +380,14 @@
 {
   "runningSessionId": "uuid",
   "status": "ENDED",
-  "nextStep": "HEART_RATE_CHECK"
+  "nextStep": "HEART_RATE_CHECK",
+  "defaultHeartRateSource": "WATCH"
 }
 ```
+
+- `defaultHeartRateSource`는 화면 5에서 기본으로 선택해 둘 측정 방식입니다.
+  가장 최근 측정의 방식을 쓰고, 측정 이력이 없으면 애플 헬스 연동 여부에 따라 `WATCH`/`RPPG`입니다.
+  사용자는 화면 5 상단의 버튼으로 다른 방식을 고를 수 있습니다.
 
 ---
 
@@ -406,40 +411,60 @@
 
 - `heartRateSource: "RPPG"` 선택 시 `nextStep: "RPPG_GUIDE"` 반환 → 화면 6으로 분기
 
-### 4.2 워치 데이터 조회 (애플 헬스 연동) (화면 5)
+### 4.2 워치 데이터 업로드 (애플 헬스 연동) (화면 5)
 
-`GET /integrations/apple-health/heart-rate?runningSessionId={id}`
+`POST /integrations/apple-health/heart-rate`
 
-**Response 200**
+- HealthKit은 온디바이스 API라 서버가 직접 읽을 수 없습니다. 앱이 읽은 값을 업로드합니다.
+- 앱은 HealthKit 읽기에 성공했을 때만 호출하므로 `syncStatus`는 항상 `SUCCESS`입니다.
+
+**Request**
 
 ```json
 {
+  "runningSessionId": "uuid",
+  "avgBpm": 152,
+  "maxBpm": 168,
+  "hrvMs": 42,
+  "syncedAt": "2026-08-04T06:55:00"
+}
+```
+
+- `hrvMs`는 선택입니다(기기·측정 조건에 따라 안 나올 수 있음).
+
+**Response 201**
+
+```json
+{
+  "heartRateMeasurementId": "uuid",
   "heartRateSource": "WATCH",
   "avgBpm": 152,
   "maxBpm": 168,
   "hrvMs": 42,
-  "syncedAt": "2026-08-04T06:55:00+09:00"
+  "syncStatus": "SUCCESS"
 }
 ```
 
-**연동 실패 시 (E5010)** — 실패 응답은 래퍼 전체를 그대로 표기했습니다.
+> 서버가 애플 헬스를 호출하지 않게 되어 `E5010`은 이 엔드포인트에서 발생하지 않습니다.
+> 공통 에러 코드 표(§0)에는 그대로 남아 있습니다.
+
+### 4.3 애플 헬스 연동 기록 (최초 1회 / 워치 있음 선택 시)
+
+`POST /integrations/apple-health/link`
+
+- HealthKit 권한 동의는 OS 다이얼로그로 끝나므로 서버가 돌려줄 `authorizeUrl`이 없습니다.
+- 앱이 동의 결과를 서버에 기록합니다. 사용자가 iOS 설정에서 권한을 회수하면 `false`로도 호출됩니다.
+
+**Request**
 
 ```json
-{
-  "success": false,
-  "data": null,
-  "error": { "code": "E5010", "message": "애플 헬스 데이터를 가져오지 못했습니다." }
-}
+{ "linked": true }
 ```
-
-### 4.3 애플 헬스 연동 시작 (최초 1회 / 워치 있음 선택 시)
-
-`GET /integrations/apple-health/authorize`
 
 **Response 200**
 
 ```json
-{ "authorizeUrl": "healthkit://authorize?..." }
+{ "appleHealthLinked": true }
 ```
 
 ### 4.4 rPPG 측정 안내 조회 (화면 6)
@@ -502,7 +527,9 @@
 }
 ```
 
-- `signalQuality: "POOR"`인 경우 서버는 `syncStatus: "FAILED"`로 저장하고 재측정 유도 (기록 화면의 "측정 실패 · 재측정 필요"에 대응)
+- `signalQuality: "POOR"`인 경우 서버는 `syncStatus: "FAILED"`로 저장하고 **`avgBpm`/`maxBpm`/`hrvMs`를 `null`로 버립니다**
+  (신뢰할 수 없는 값이 홈 대시보드의 주간 평균 bpm에 섞이지 않도록). 기록 화면의 "측정 실패 · 재측정 필요"에 대응하며,
+  실패도 에러가 아니라 재측정이 필요한 기록이므로 응답은 201입니다.
 
 ---
 
@@ -598,6 +625,9 @@
   }
 }
 ```
+
+- `range`는 `{일수}d` 형식입니다(`7d`, `30d`, `90d`…). 생략하면 `30d`. 형식이 어긋나거나 0 이하면 `E4001`입니다.
+- `sourceRatio`는 같은 `range` 안의 실제 건수입니다. `rppgFailedCount`는 `rppg`에서 빠지는 값이 아니라 **부분집합**입니다.
 
 ### 6.2 실패 기록 재측정
 
