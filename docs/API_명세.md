@@ -32,9 +32,9 @@
 • `POST /running-sessions/{id}/end` |
 | **5** | **심박수 확인 (워치)** | • `POST /running-sessions/{id}/heart-rate/select-source`
 
-• `GET /integrations/apple-health/heart-rate`
+• `POST /integrations/apple-health/heart-rate`
 
-• `GET /integrations/apple-health/authorize` |
+• `POST /integrations/apple-health/link` |
 | **6** | **심박수 확인 (rPPG)** | • `GET /heart-rate-measurements/rppg/guide`
 
 • `POST /heart-rate-measurements/rppg/start`
