@@ -2,17 +2,20 @@ package jungkathon3team.aftergrow.heartrate.service;
 
 import jungkathon3team.aftergrow.common.exception.BusinessException;
 import jungkathon3team.aftergrow.common.exception.ErrorCode;
+import jungkathon3team.aftergrow.heartrate.dto.AppleHealthDto;
 import jungkathon3team.aftergrow.heartrate.dto.HeartRateMeasurementResponse;
 import jungkathon3team.aftergrow.heartrate.dto.HeartRateRecordsResponse;
 import jungkathon3team.aftergrow.heartrate.dto.RetryResponse;
 import jungkathon3team.aftergrow.heartrate.dto.RppgGuideResponse;
 import jungkathon3team.aftergrow.heartrate.dto.RppgResultDto;
 import jungkathon3team.aftergrow.heartrate.dto.RppgStartDto;
+import jungkathon3team.aftergrow.heartrate.dto.SelectSourceDto;
 import jungkathon3team.aftergrow.heartrate.entity.HeartRateMeasurement;
 import jungkathon3team.aftergrow.heartrate.entity.HeartRateSource;
 import jungkathon3team.aftergrow.heartrate.entity.SyncStatus;
 import jungkathon3team.aftergrow.heartrate.repository.HeartRateMeasurementRepository;
 import jungkathon3team.aftergrow.heartrate.repository.RppgSessionStore;
+import jungkathon3team.aftergrow.profile.entity.IntegrationStatus;
 import jungkathon3team.aftergrow.profile.repository.IntegrationStatusRepository;
 import jungkathon3team.aftergrow.running.entity.RunningSession;
 import jungkathon3team.aftergrow.running.repository.RunningSessionRepository;
@@ -178,6 +181,77 @@ public class HeartRateMeasurementService {
                 RetryResponse.RETRY_FLOW_RPPG_GUIDE,
                 session.getRunningSessionId()
         );
+    }
+
+    /**
+     * R4.1 POST /running-sessions/{id}/heart-rate/select-source
+     * <p>선택값을 저장하지 않는다 — 이후 흐름(R4.2/R4.6)이 각자 source를 확정하므로 읽는 곳이 없다.
+     * 세션 소유자만 확인하고 다음 화면을 알려준다.
+     */
+    public SelectSourceDto.Response selectSource(UUID userId,
+                                                 UUID sessionId,
+                                                 SelectSourceDto.Request request) {
+        getOwnedSession(userId, sessionId);
+
+        String nextStep = request.heartRateSource() == HeartRateSource.WATCH
+                ? SelectSourceDto.Response.NEXT_STEP_FETCH_APPLE_HEALTH
+                : SelectSourceDto.Response.NEXT_STEP_RPPG_GUIDE;
+
+        return new SelectSourceDto.Response(request.heartRateSource(), nextStep);
+    }
+
+    /**
+     * R4.2 POST /integrations/apple-health/heart-rate
+     * <p>명세는 서버가 애플 헬스를 조회하는 GET이지만, HealthKit은 온디바이스 API라 서버가 읽을 수 없다.
+     * 앱이 읽은 값을 올리는 구조로 바꿨다. 앱은 읽기에 성공했을 때만 호출하므로 항상 SUCCESS다.
+     */
+    @Transactional
+    public HeartRateMeasurementResponse uploadWatchMeasurement(UUID userId,
+                                                               AppleHealthDto.HeartRateRequest request) {
+        RunningSession session = getOwnedSession(userId, request.runningSessionId());
+
+        HeartRateMeasurement measurement = heartRateMeasurementRepository.save(
+                HeartRateMeasurement.watch(
+                        session,
+                        request.avgBpm(),
+                        request.maxBpm(),
+                        request.hrvMs(),
+                        request.syncedAt()
+                ));
+
+        return HeartRateMeasurementResponse.from(measurement);
+    }
+
+    /**
+     * R4.3 POST /integrations/apple-health/link
+     * <p>명세의 authorize를 대체한다 — HealthKit 권한 동의는 OS 다이얼로그로 끝나므로
+     * 서버가 돌려줄 authorizeUrl이 없다. 앱이 동의 결과를 알려오면 기록만 한다.
+     * <p>사용자가 iOS 설정에서 권한을 회수하면 false로도 들어온다.
+     */
+    @Transactional
+    public AppleHealthDto.LinkResponse linkAppleHealth(UUID userId, AppleHealthDto.LinkRequest request) {
+        IntegrationStatus status = integrationStatusRepository.findById(userId)
+                .orElseGet(() -> IntegrationStatus.of(userId));
+
+        status.linkAppleHealth(request.linked());
+        integrationStatusRepository.save(status);
+
+        return new AppleHealthDto.LinkResponse(status.isAppleHealthLinked());
+    }
+
+    /**
+     * 화면 5에서 기본으로 선택해 둘 측정 방식.
+     * <p>명세에 없는 요구(최근 쓴 방식이 기본, 버튼으로 전환)를 위해 R3.5 /end 응답이 실어 보낸다.
+     * 별도 컬럼 없이 측정 이력에서 파생하므로, 고르기만 하고 측정을 끝내지 않은 선택은 기억되지 않는다.
+     */
+    public HeartRateSource defaultSourceFor(UUID userId) {
+        return heartRateMeasurementRepository
+                .findTopByRunningSession_User_UserIdOrderByMeasuredAtDesc(userId)
+                .map(HeartRateMeasurement::getHeartRateSource)
+                .orElseGet(() -> integrationStatusRepository.findById(userId)
+                        .filter(IntegrationStatus::isAppleHealthLinked)
+                        .map(status -> HeartRateSource.WATCH)
+                        .orElse(HeartRateSource.RPPG));
     }
 
     /**
