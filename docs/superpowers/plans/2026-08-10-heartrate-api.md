@@ -1121,8 +1121,9 @@ class HeartRateMeasurementServiceTest {
                 .isInstanceOf(BusinessException.class);
     }
 
+    // 자바 식별자는 숫자로 시작할 수 없어 앞에 _를 붙인다.
     @Test
-    void 0일_조회는_E4001이다() {
+    void _0일_조회는_E4001이다() {
         assertThatThrownBy(() -> HeartRateMeasurementService.sinceOf("0d", NOW))
                 .isInstanceOf(BusinessException.class);
     }
