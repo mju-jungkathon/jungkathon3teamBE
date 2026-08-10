@@ -2,13 +2,19 @@ package jungkathon3team.aftergrow.heartrate.service;
 
 import jungkathon3team.aftergrow.common.exception.BusinessException;
 import jungkathon3team.aftergrow.common.exception.ErrorCode;
+import jungkathon3team.aftergrow.heartrate.dto.HeartRateMeasurementResponse;
 import jungkathon3team.aftergrow.heartrate.dto.HeartRateRecordsResponse;
+import jungkathon3team.aftergrow.heartrate.dto.RetryResponse;
+import jungkathon3team.aftergrow.heartrate.dto.RppgGuideResponse;
+import jungkathon3team.aftergrow.heartrate.dto.RppgResultDto;
+import jungkathon3team.aftergrow.heartrate.dto.RppgStartDto;
 import jungkathon3team.aftergrow.heartrate.entity.HeartRateMeasurement;
 import jungkathon3team.aftergrow.heartrate.entity.HeartRateSource;
 import jungkathon3team.aftergrow.heartrate.entity.SyncStatus;
 import jungkathon3team.aftergrow.heartrate.repository.HeartRateMeasurementRepository;
 import jungkathon3team.aftergrow.heartrate.repository.RppgSessionStore;
 import jungkathon3team.aftergrow.profile.repository.IntegrationStatusRepository;
+import jungkathon3team.aftergrow.running.entity.RunningSession;
 import jungkathon3team.aftergrow.running.repository.RunningSessionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -97,5 +103,93 @@ public class HeartRateMeasurementService {
                 .count();
 
         return new HeartRateRecordsResponse.SourceRatio(watch, rppg, rppgFailed);
+    }
+
+    /** R4.4 GET /heart-rate-measurements/rppg/guide — 고정 안내 문구. */
+    public RppgGuideResponse rppgGuide() {
+        return RppgGuideResponse.defaults();
+    }
+
+    /**
+     * R4.5 POST /heart-rate-measurements/rppg/start
+     * <p>DB에는 아무것도 쓰지 않는다. 측정 중 매핑만 Redis에 남기고,
+     * 측정 기록은 R4.6 결과 제출에서 처음 생성된다.
+     */
+    public RppgStartDto.Response startRppg(UUID userId, RppgStartDto.Request request) {
+        RunningSession session = getOwnedSession(userId, request.runningSessionId());
+
+        UUID rppgSessionId = UUID.randomUUID();
+        rppgSessionStore.save(rppgSessionId, session.getRunningSessionId());
+
+        return new RppgStartDto.Response(
+                rppgSessionId,
+                RppgStartDto.Response.STATUS_MEASURING,
+                RppgGuideResponse.DURATION_SEC
+        );
+    }
+
+    /**
+     * R4.6 POST /heart-rate-measurements/rppg/{rppgSessionId}/result
+     * <p>신호 품질이 POOR이면 FAILED로 저장된다(값을 버리는 판단은 엔티티가 한다).
+     * 실패도 에러가 아니라 "재측정이 필요한 기록"이라 201로 응답한다.
+     * <p>Redis 키는 제출 후 삭제해 같은 rppgSessionId로 두 번 제출할 수 없게 한다.
+     */
+    @Transactional
+    public HeartRateMeasurementResponse submitRppgResult(UUID userId,
+                                                         UUID rppgSessionId,
+                                                         RppgResultDto.Request request) {
+        UUID runningSessionId = rppgSessionStore.findRunningSessionId(rppgSessionId)
+                // 만료됐거나 이미 제출됐거나 애초에 없던 id. 어느 세션의 것인지 알 수 없어 404다.
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND)); // E4040
+
+        RunningSession session = getOwnedSession(userId, runningSessionId);
+
+        HeartRateMeasurement measurement = heartRateMeasurementRepository.save(
+                HeartRateMeasurement.rppg(
+                        session,
+                        request.avgBpm(),
+                        request.maxBpm(),
+                        request.hrvMs(),
+                        request.measuredAt(),
+                        request.signalQuality()
+                ));
+
+        rppgSessionStore.delete(rppgSessionId);
+
+        return HeartRateMeasurementResponse.from(measurement);
+    }
+
+    /**
+     * R6.2 POST /heart-rate-measurements/{id}/retry
+     * <p>실패 기록을 삭제하지 않는다. 재측정 성공 행이 따로 쌓이고 실패 이력은 화면 8에 남는다.
+     * <p>syncStatus가 FAILED가 아닌 기록에 호출해도 막지 않는다 — 명세에 전용 에러 코드가 없고,
+     * 멀쩡한 측정을 다시 하겠다는 것을 거부할 이유가 없다.
+     */
+    public RetryResponse retry(UUID userId, UUID measurementId) {
+        HeartRateMeasurement measurement = heartRateMeasurementRepository.findById(measurementId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND)); // E4040
+
+        RunningSession session = measurement.getRunningSession();
+        if (!session.isOwnedBy(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN); // E4030
+        }
+
+        return new RetryResponse(
+                RetryResponse.RETRY_FLOW_RPPG_GUIDE,
+                session.getRunningSessionId()
+        );
+    }
+
+    /**
+     * 세션을 찾고 소유자를 확인한다.
+     * <p>남의 세션은 404가 아니라 E4030이다 — 존재 여부 자체를 노출하지 않기 위함.
+     */
+    private RunningSession getOwnedSession(UUID userId, UUID sessionId) {
+        RunningSession session = runningSessionRepository.findById(sessionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND)); // E4040
+        if (!session.isOwnedBy(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN); // E4030
+        }
+        return session;
     }
 }
