@@ -66,12 +66,18 @@ docker compose ps          # postgres/redis 가 healthy 인지 확인
 
 ### 신규 테스트
 
-| 파일 | 덮는 것 |
-|---|---|
-| `heartrate/entity/HeartRateMeasurementTest.java` | POOR → bpm/hrv null (순수 단위, Spring 없음) |
-| `profile/entity/IntegrationStatusTest.java` | `linkAppleHealth` (순수 단위) |
-| `heartrate/repository/RppgSessionStoreTest.java` | Redis 저장/조회/삭제 |
-| `heartrate/service/HeartRateMeasurementServiceTest.java` | `range` 파싱 · `sourceRatio` 집계 · 기본 source 파생 |
+| 파일 | 덮는 것 | 태스크 |
+|---|---|---|
+| `heartrate/entity/HeartRateMeasurementTest.java` | POOR → bpm/hrv null (순수 단위, Spring 없음) | 1 |
+| `profile/entity/IntegrationStatusTest.java` | `linkAppleHealth` (순수 단위) | 2 |
+| `heartrate/repository/RppgSessionStoreTest.java` | Redis 저장/조회/삭제/TTL | 3 |
+| `heartrate/service/HeartRateMeasurementServiceTest.java` | `range` 파싱 · 6.1 목록 · `sourceRatio` 집계 | 5, 6 |
+| `heartrate/service/HeartRateRppgFlowTest.java` | 4.4·4.5·4.6 rPPG 흐름 · 6.2 재측정 | 7 |
+| `heartrate/service/HeartRateAppleHealthTest.java` | 4.1·4.2·4.3 · 기본 source 파생 | 8 |
+| `heartrate/controller/HeartRateControllerTest.java` | 엔드포인트 인가 · 응답 래핑 | 9 |
+| `running/RunningEndDefaultSourceTest.java` | `/end` 응답의 `defaultHeartRateSource` | 10 |
+
+설계 문서 §7은 "한 파일"이라 했지만 8개로 나뉜다. Redis를 쓰는 흐름은 `@Transactional` 롤백이 통하지 않아 `@AfterEach` 정리가 필요하고, 순수 단위 테스트는 Spring 컨텍스트 없이 도는 편이 빠르며, 컨트롤러 테스트는 `@AutoConfigureMockMvc`가 따로 필요하다. 덮는 내용은 설계 문서 §7의 네 가지를 모두 포함한다.
 
 ### 수정
 
