@@ -9,6 +9,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @Slf4j
@@ -41,6 +42,16 @@ public class GlobalExceptionHandler {
         log.debug("요청 본문 파싱 실패", e);
         return toResponse(ErrorCode.INVALID_REQUEST,
                 "요청 본문을 읽을 수 없습니다. JSON 형식과 UTF-8 인코딩을 확인하세요.");
+    }
+
+    /**
+     * 경로 변수 타입이 맞지 않는 경우(예: UUID 자리에 "notauuid"). 파싱 실패는 클라이언트 잘못이라
+     * 500이 아니라 400이어야 합니다.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        log.debug("경로/파라미터 타입 불일치: {}", e.getName());
+        return toResponse(ErrorCode.INVALID_REQUEST, ErrorCode.INVALID_REQUEST.getMessage());
     }
 
     /** 매핑된 핸들러가 없는 경로. 존재하지 않는 URL은 서버 오류가 아니라 404입니다. */
