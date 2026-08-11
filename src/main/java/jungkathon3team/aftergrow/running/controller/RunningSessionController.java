@@ -4,6 +4,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jungkathon3team.aftergrow.common.response.ApiResponse;
+import jungkathon3team.aftergrow.heartrate.dto.SelectSourceDto;
+import jungkathon3team.aftergrow.heartrate.service.HeartRateMeasurementService;
 import jungkathon3team.aftergrow.running.dto.RunningEndDto;
 import jungkathon3team.aftergrow.running.dto.RunningLiveResponse;
 import jungkathon3team.aftergrow.running.dto.RunningPrepareResponse;
@@ -25,6 +27,7 @@ import java.util.UUID;
 public class RunningSessionController {
 
     private final RunningSessionService runningSessionService;
+    private final HeartRateMeasurementService heartRateMeasurementService;
 
     @Operation(summary = "러닝 준비",
             description = "화면 3 진입 시 UV/위치/스트레칭을 안내합니다.")
@@ -67,5 +70,18 @@ public class RunningSessionController {
             @Valid @RequestBody RunningEndDto.Request request
     ) {
         return ApiResponse.ok(runningSessionService.endRunning(userId, sessionId, request));
+    }
+
+    @Operation(summary = "심박수 측정 방식 선택",
+            description = "화면 5에서 워치/rPPG 중 하나를 고르면 다음 화면을 알려줍니다. "
+                    + "선택값은 저장하지 않습니다.")
+    @PostMapping("/{id}/heart-rate/select-source")
+    public ApiResponse<SelectSourceDto.Response> selectHeartRateSource(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable("id") UUID sessionId,
+            @Valid @RequestBody SelectSourceDto.Request request
+    ) {
+        return ApiResponse.ok(
+                heartRateMeasurementService.selectSource(userId, sessionId, request));
     }
 }

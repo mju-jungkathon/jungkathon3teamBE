@@ -5,6 +5,7 @@ import jungkathon3team.aftergrow.auth.repository.UserRepository;
 import jungkathon3team.aftergrow.common.exception.BusinessException;
 import jungkathon3team.aftergrow.common.exception.ErrorCode;
 import jungkathon3team.aftergrow.heartrate.entity.HeartRateMeasurement;
+import jungkathon3team.aftergrow.heartrate.entity.SyncStatus;
 import jungkathon3team.aftergrow.heartrate.repository.HeartRateMeasurementRepository;
 import jungkathon3team.aftergrow.home.dto.HomeResponse;
 import jungkathon3team.aftergrow.profile.repository.UserGoalRepository;
@@ -59,8 +60,10 @@ public class HomeService {
                 .orElse(0);
         int remainingToGoal = Math.max(0, weeklyGoalCount - (int) weeklyRunCount);
 
+        // 실패한 측정(avgBpm=null)이 최신이어도 건너뛰고, 그 이전의 성공한 측정으로 폴백한다.
+        // 필터 없이 조회하면 "측정 없음"과 "측정 실패"를 클라이언트가 구분할 수 없다.
         HomeResponse.LatestMeasurement latestMeasurement = heartRateMeasurementRepository
-                .findTopByRunningSession_User_UserIdOrderByMeasuredAtDesc(userId)
+                .findTopByRunningSession_User_UserIdAndSyncStatusOrderByMeasuredAtDesc(userId, SyncStatus.SUCCESS)
                 .map(HomeService::toLatestMeasurement)
                 .orElse(null);
 
