@@ -40,9 +40,35 @@ SPRING_PROFILES_ACTIVE=test SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:54
 
 CI(`.github/workflows/test.yml`)는 `SPRING_PROFILES_ACTIVE=test`로 돌고, **datasource/redis 접속 정보만 환경변수로 주입**합니다. 나머지(`jwt.*`, `ddl-auto`, flyway)는 커밋되는 `src/test/resources/application-test.yml`에 있습니다.
 
-> ⚠️ **설정 키를 추가할 때는 `application-local.yml`과 `application-test.yml` 양쪽에 넣으세요.** local에만 넣으면 로컬 테스트는 통과하고 CI만 `PlaceholderResolutionException`으로 죽습니다. 실제로 `jwt.*`에서 한 번 겪었습니다.
+> ⚠️ **설정 키를 추가할 때는 세 파일 전부에 넣으세요** — `application-local.yml`(로컬), `src/test/resources/application-test.yml`(CI), `src/main/resources/application-prod.yml`(배포). local에만 넣으면 로컬 테스트는 통과하고 CI만 `PlaceholderResolutionException`으로 죽습니다. 실제로 `jwt.*`에서 한 번 겪었습니다. **prod만 빠뜨리면 로컬과 CI가 전부 통과하고 배포된 서버만 기동 시 죽습니다** — 가장 늦게 발견되는 형태입니다.
 
 `gradlew`는 git에 `100755`로 기록돼 있어야 합니다. Windows는 `core.fileMode=false`라 권한 비트를 무시하므로, 실수로 `100644`가 되면 로컬에선 멀쩡하고 Ubuntu 러너에서만 `Permission denied`(exit 126)로 죽습니다. `git ls-files -s gradlew`로 확인하고 `git update-index --chmod=+x gradlew`로 고칩니다.
+
+## 배포
+
+**`main`에 머지하면 배포까지 자동으로 끝납니다.** `.github/workflows/deploy.yml`이 이미지를 빌드해 `ghcr.io/mju-jungkathon/aftergrow`에 `:latest`·`:{sha}`로 올린 뒤, SSH로 EC2에 들어가 `git pull` → `compose pull` → `up -d` → 헬스체크까지 수행합니다. 헬스체크가 90초 안에 200을 주지 못하면 워크플로가 실패합니다.
+
+**EC2(t2.micro, 1GB)에서 `docker build`나 `./gradlew build`를 돌리지 마세요.** postgres·redis·app이 같은 호스트에 있어서, Gradle이 메모리를 다 쓰면 돌아가던 컨테이너가 OOM killer에 종료됩니다. EC2가 하는 일은 pull 뿐입니다.
+
+**배포 때마다 수십 초 끊깁니다** — `up -d`가 컨테이너를 내렸다 새로 띄웁니다. 시연 중에는 `main`에 머지하지 마세요.
+
+수동으로 배포해야 할 때(워크플로가 막혔을 때)만 EC2에서:
+
+```bash
+cd /home/ubuntu/jungkathon3teamBE
+git pull origin main
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+curl localhost:8080/actuator/health     # {"status":"UP"}
+```
+
+- **EC2에서 파일을 직접 고치지 마세요.** 고쳐도 다음 배포의 `git pull`에서 막히거나 덮어써집니다. 문제 3이 그렇게 생겼습니다.
+- `docker-compose.yml`은 **로컬 개발용**(postgres·redis만), `docker-compose.prod.yml`이 **배포용**(app 포함)입니다. override 체인은 쓰지 않습니다.
+- 리포지토리 시크릿 `EC2_HOST`·`EC2_USER`·`EC2_SSH_KEY`가 배포에 쓰입니다. EC2를 재생성하면 셋 다 갱신해야 합니다.
+- prod compose는 postgres·redis 포트를 공개하지 않습니다. app의 8080만 열립니다.
+- GHCR 패키지는 private이라 EC2에서 최초 1회 `docker login ghcr.io`(PAT, `read:packages`)가 필요합니다.
+- **DB 볼륨을 지우지 않도록 `docker compose down -v`를 쓰지 마세요.**
+- `/actuator/health`는 `SecurityConfig`의 `PUBLIC_PATHS`에 있어 토큰 없이 열립니다. actuator 기본 노출은 `health` 하나뿐이고 `show-details`는 `never`라 응답은 `{"status":"UP"}`뿐입니다. **Redis가 죽으면 503이 되는데 이는 의도된 동작입니다** — refresh token이 Redis에만 있어 로그인·재발급이 실제로 불가능한 상태이기 때문입니다.
 
 ## 아키텍처
 
