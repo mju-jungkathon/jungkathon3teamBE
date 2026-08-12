@@ -35,6 +35,11 @@ public class SecurityConfig {
             "/auth/signup",
             "/auth/login",
             "/auth/refresh",
+            // 로드밸런서·모니터링이 토큰 없이 호출한다. /actuator/** 와일드카드를 쓰지 않는
+            // 이유는 위 /auth/** 와 같다 — 이후 노출되는 actuator 엔드포인트가 딸려 열린다.
+            // actuator 기본 노출은 health 하나뿐이고 show-details 기본값이 never라
+            // 응답은 {"status":"UP"}뿐이다. 별도 설정을 두지 않는다.
+            "/actuator/health",
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/v3/api-docs/**",

@@ -1,0 +1,65 @@
+# EC2 배포용입니다. 로컬 개발은 docker-compose.yml을 쓰세요.
+#
+# app은 빌드하지 않고 GHCR에서 받습니다 — EC2(t2.micro, 1GB)에서 Gradle 빌드를
+# 돌리면 같은 호스트의 postgres/app이 OOM killer에 종료됩니다.
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+services:
+  app:
+    image: ghcr.io/mju-jungkathon/aftergrow:latest
+    container_name: aftergrow-app
+    restart: unless-stopped
+    # cgroup 메모리 제한이 없으면 JVM이 호스트 전체(1GB)를 기준으로 삼아
+    # Dockerfile의 MaxRAMPercentage=50.0이 512MB 힙이 됩니다 — postgres·redis와
+    # 같은 1GB를 나눠 쓰는 처지에 JDK 기본값(25%)보다 두 배 큰 값입니다.
+    # 이 제한이 있어야 MaxRAMPercentage가 실제로 힙을 256MB로 묶습니다.
+    mem_limit: 512m
+    ports:
+      - "8080:8080"
+    environment:
+      # application.yml의 active: local 하드코딩을 환경변수가 덮어씁니다
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # ponytail: app에는 healthcheck를 두지 않습니다. JRE 이미지에 curl/wget이 없어
+    # 한 줄로 끝나지 않고, 단일 호스트에서 헬스체크가 할 수 있는 일은 재시작뿐이라
+    # restart: unless-stopped와 겹칩니다. ALB를 붙일 때 /actuator/health로 추가하세요.
+
+  postgres:
+    image: postgres:16
+    container_name: aftergrow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # ports를 공개하지 않습니다. app이 컨테이너 네트워크로만 접근합니다.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    container_name: aftergrow-redis
+    restart: unless-stopped
+    # ports를 공개하지 않습니다.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

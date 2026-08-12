@@ -21,7 +21,7 @@ docker compose up -d          # PostgreSQL + Redis (실행 필수, 아래 참고
 
 **`test`/`build`는 Docker 컨테이너가 떠 있어야 통과합니다.** `contextLoads()`가 `@SpringBootTest`로 실제 PostgreSQL에 붙기 때문에 컨테이너 없이 돌리면 HibernateException으로 실패합니다. 빌드 실패 시 가장 먼저 `docker compose ps`로 postgres/redis가 healthy인지 확인하세요.
 
-테스트는 29개입니다. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
+테스트는 22개 클래스 153개 `@Test` 메서드이고, `running`(`RunningSessionApiTest`)·`home`(`HomeDashboardTest`)·`heartrate`(`HeartRateControllerTest`)·`profile`(`ProfileApiTest`)을 포함해 모든 도메인에 통합 테스트가 있습니다. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
 
 CI 환경을 로컬에서 재현하려면 (프로파일별로 설정이 달라 한쪽만 통과하는 일이 생깁니다):
 
@@ -40,9 +40,45 @@ SPRING_PROFILES_ACTIVE=test SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:54
 
 CI(`.github/workflows/test.yml`)는 `SPRING_PROFILES_ACTIVE=test`로 돌고, **datasource/redis 접속 정보만 환경변수로 주입**합니다. 나머지(`jwt.*`, `ddl-auto`, flyway)는 커밋되는 `src/test/resources/application-test.yml`에 있습니다.
 
-> ⚠️ **설정 키를 추가할 때는 `application-local.yml`과 `application-test.yml` 양쪽에 넣으세요.** local에만 넣으면 로컬 테스트는 통과하고 CI만 `PlaceholderResolutionException`으로 죽습니다. 실제로 `jwt.*`에서 한 번 겪었습니다.
+> ⚠️ **설정 키를 추가할 때는 세 파일 전부에 넣으세요** — `application-local.yml`(로컬), `src/test/resources/application-test.yml`(CI), `src/main/resources/application-prod.yml`(배포). local에만 넣으면 로컬 테스트는 통과하고 CI만 `PlaceholderResolutionException`으로 죽습니다. 실제로 `jwt.*`에서 한 번 겪었습니다. **prod만 빠뜨리면 로컬과 CI가 전부 통과하고 배포된 서버만 기동 시 죽습니다** — 가장 늦게 발견되는 형태입니다.
 
 `gradlew`는 git에 `100755`로 기록돼 있어야 합니다. Windows는 `core.fileMode=false`라 권한 비트를 무시하므로, 실수로 `100644`가 되면 로컬에선 멀쩡하고 Ubuntu 러너에서만 `Permission denied`(exit 126)로 죽습니다. `git ls-files -s gradlew`로 확인하고 `git update-index --chmod=+x gradlew`로 고칩니다.
+
+## 배포
+
+**`main`에 머지하면 배포까지 자동으로 끝납니다.** `.github/workflows/deploy.yml`이 이미지를 빌드해 `ghcr.io/mju-jungkathon/aftergrow`에 `:latest`·`:{sha}`로 올린 뒤, SSH로 EC2에 들어가 `git pull` → `compose pull` → `up -d` → 헬스체크까지 수행합니다. 헬스체크가 180초 안에 200을 주지 못하면 워크플로가 실패합니다.
+
+**EC2(t2.micro, 1GB)에서 `docker build`나 `./gradlew build`를 돌리지 마세요.** postgres·redis·app이 같은 호스트에 있어서, Gradle이 메모리를 다 쓰면 돌아가던 컨테이너가 OOM killer에 종료됩니다. EC2가 하는 일은 pull 뿐입니다.
+
+**배포 때마다 수십 초 끊깁니다** — `up -d`가 컨테이너를 내렸다 새로 띄웁니다. 시연 중에는 `main`에 머지하지 마세요.
+
+수동으로 배포해야 할 때(워크플로가 막혔을 때)만 EC2에서:
+
+```bash
+cd /home/ubuntu/jungkathon3teamBE
+git pull origin main
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+curl localhost:8080/actuator/health     # {"status":"UP"}
+```
+
+- **EC2에서 파일을 직접 고치지 마세요.** 고쳐도 다음 배포의 `git pull`에서 막히거나 덮어써집니다. 문제 3이 그렇게 생겼습니다.
+- `docker-compose.yml`은 **로컬 개발용**(postgres·redis만), `docker-compose.prod.yml`이 **배포용**(app 포함)입니다. override 체인은 쓰지 않습니다.
+- 리포지토리 시크릿 `EC2_HOST`·`EC2_USER`·`EC2_SSH_KEY`가 배포에 쓰입니다. EC2를 재생성하면 셋 다 갱신해야 합니다.
+- prod compose는 postgres·redis 포트를 공개하지 않습니다. app의 8080만 열립니다.
+- GHCR 패키지는 private이라 EC2에서 최초 1회 `docker login ghcr.io`(PAT, `read:packages`)가 필요합니다.
+- **DB 볼륨을 지우지 않도록 `docker compose down -v`를 쓰지 마세요.**
+- `/actuator/health`는 `SecurityConfig`의 `PUBLIC_PATHS`에 있어 토큰 없이 열립니다. actuator 기본 노출은 `health` 하나뿐이고 `show-details`는 `never`라 응답은 `{"status":"UP"}`뿐입니다. **Redis가 죽으면 503이 되는데 이는 의도된 동작입니다** — refresh token과 rPPG 세션이 Redis에만 있어 로그인·재발급·rPPG 재측정이 실제로 불가능한 상태이기 때문입니다.
+
+**롤백:** `docker-compose.prod.yml`은 `:latest`만 참조하고, EC2도 `:latest`만 pull하므로 이전 이미지는 다른 태그로 남지 않습니다. 게다가 배포 성공 직후 `docker image prune -f`가 태그 없는 이전 이미지를 지웁니다 — 헬스체크는 통과했지만 런타임에 버그가 있는 배포를 되돌릴 방법이 로컬에 없다는 뜻입니다. 되돌릴 수 있는 것은 `:{sha}` 태그뿐입니다(Deploy 워크플로가 `latest`와 함께 올립니다). sha는 Actions 실행 로그나 `git log --oneline`에서 확인합니다.
+
+```bash
+docker pull ghcr.io/mju-jungkathon/aftergrow:<이전 커밋 sha>
+docker tag  ghcr.io/mju-jungkathon/aftergrow:<이전 커밋 sha> ghcr.io/mju-jungkathon/aftergrow:latest
+docker compose -f docker-compose.prod.yml up -d
+```
+
+- EC2의 `.env`가 `POSTGRES_*`와 `JWT_SECRET`을 공급합니다. `.env`가 없거나 값이 잘리면 다음 배포에서 postgres가 그대로 죽습니다 — compose는 `.env`를 읽지 못해도 조용히 빈 문자열을 넘기고, `pg_isready` healthcheck가 실패하며 app이 postgres를 기다리다 멈춥니다.
 
 ## 아키텍처
 
@@ -66,7 +102,7 @@ Spring Security는 **7.0.6**, Spring Framework는 7.0.8입니다. 람다 DSL만 
 ### 저장소 역할 분담
 
 - **PostgreSQL** — 서버가 재시작돼도 남아야 하는 것: 사용자, 러닝 세션 결과, 심박수 기록.
-- **Redis** — 사라져도 다시 만들 수 있는 것: refresh token, 러닝 진행 중 실시간 상태(`/live` 폴링), rate limit 카운터.
+- **Redis** — 사라져도 다시 만들 수 있는 것: refresh token, rate limit 카운터. (러닝 진행 중 상태도 원래 Redis 담당이었지만 **현재는 Postgres 행을 직접 갱신**합니다 — 실제로 Redis를 쓰는 건 refresh token(`RefreshTokenStore`)과 rPPG 측정 세션(`heartrate/repository/RppgSessionStore`) 둘입니다. Redis가 죽으면 로그인·재발급뿐 아니라 rPPG 재측정 플로우도 함께 막힙니다 — `/actuator/health`가 503을 돌려주는 것도 이 때문입니다.)
 
 JWT는 access(단명) + refresh(Redis 저장) 2종. refresh를 Redis에 두는 이유는 로그아웃 시 즉시 무효화하기 위함입니다.
 
@@ -95,18 +131,20 @@ RUNNING_SESSIONS ── 1:0..1 ── RECOVERY_GUIDES ── 1:N ── RECOVERY
 
 ### 패키지 구조
 
-도메인별로 나누고, 각 도메인 안에서 `controller/service/entity/repository/dto`로 계층을 나눕니다. **현재 실제로 존재하는 건 `auth/entity/User`와 `auth/repository/UserRepository` 둘뿐이고, 아래 나머지는 전부 계획 상태입니다** — DB 스키마(V1~V9)는 ERD 전체를 덮고 있지만 자바 코드는 `users` 테이블까지만 따라와 있습니다.
+도메인별로 나누고, 각 도메인 안에서 `controller/service/entity/repository/dto`로 계층을 나눕니다. DB 스키마(V1~V9)는 ERD 전체를 덮고 있지만 자바 코드는 아직 일부만 따라와 있습니다.
 
 ```
 jungkathon3team.aftergrow
-├── auth/       # 회원가입·로그인·재발급·로그아웃 ✔ (인증 도메인 완료)
-├── home/       # 홈 대시보드
-├── running/    # RunningSession, StretchingSession
-├── heartrate/  # HeartRateMeasurement
-├── recovery/   # RecoveryGuide, RecoveryAction
-├── profile/    # UserGoal, NotificationSetting, IntegrationStatus
-└── common/     # ApiResponse<T>, 전역 예외 처리, SecurityConfig / RedisConfig
+├── auth/       # 회원가입·로그인·재발급·로그아웃 ✔ 완료
+├── home/       # GET /home 대시보드 ✔ (여러 도메인 집계)
+├── running/    # prepare / 시작 / live / end + 스트레칭 ✔, external/에 UV·위치 목 구현
+├── heartrate/  # 심박수 측정·애플헬스 연동 API ✔ (홈 집계에도 쓰임)
+├── profile/    # 프로필 API ✔ (홈 집계에도 쓰임)
+├── recovery/   # 미착수 (패키지 자체가 없음)
+└── common/     # ApiResponse<T>, ErrorCode, 예외 처리, SecurityConfig, OpenApiConfig
 ```
+
+**엔티티는 필요한 필드만 채워 넣지 말고 테이블 전체를 매핑합니다** — `ddl-auto: validate`는 누락 컬럼을 잡지 않지만, 다음 도메인이 같은 테이블을 다시 열게 됩니다. 대신 아직 쓰이지 않는 enum 후보 컬럼(`sync_status`, `signal_quality`, `goal_type`)은 **String으로 두고, 실제로 쓰는 도메인에서 enum을 확정**합니다(`HeartRateMeasurement` 주석 참고).
 
 ### 엔티티 작성 규약
 
@@ -117,9 +155,13 @@ jungkathon3team.aftergrow
 - 연관관계는 항상 `fetch = FetchType.LAZY`
 - Enum은 항상 `@Enumerated(EnumType.STRING)`
 
-아직 `User` 하나뿐이라, 두 번째 엔티티를 만들 때 `@ManyToOne` 매핑과 감사(auditing) 방식이 처음 결정됩니다. `createdAt`은 현재 `@PrePersist` 수동 방식이고 `@EnableJpaAuditing`은 쓰지 않습니다.
+- `@ManyToOne(fetch = LAZY, optional = false)` + `@JoinColumn(name = "user_id", nullable = false)` (`RunningSession` 기준)
+- PK는 `@GeneratedValue(strategy = GenerationType.UUID)`. 1:1 테이블(`UserGoal`)만 `@GeneratedValue` 없이 `user_id`를 그대로 씁니다.
+- **상태 전이는 엔티티 메서드로** — `RunningSession.start()` 정적 팩토리 + `end()`/`complete()`/`updateLiveSnapshot()`. 서비스에서 setter로 필드를 만지지 않습니다.
 
-### 아직 없는 것 (구현 순서)
+`@EnableJpaAuditing`은 쓰지 않습니다. `createdAt`은 `@PrePersist` 수동 방식이고, 그 외 시각 필드(`startedAt`, `measuredAt`, `updatedAt`)는 호출자/DTO가 넘긴 값을 그대로 저장합니다.
+
+### 공통 응답·에러
 
 `common/`은 구현됐습니다 — `ApiResponse<T>`/`ApiError`, `ErrorCode` enum, `BusinessException`, `GlobalExceptionHandler`, `SecurityExceptionHandler`, `SecurityConfig`(+ `PasswordEncoder` 빈).
 
@@ -131,11 +173,21 @@ jungkathon3team.aftergrow
 
 **응답은 성공/실패 모두 `ApiResponse`로 감쌉니다**(래퍼 A안). 명세서의 개별 엔드포인트 예시는 감싸지 않은 형태로 적혀 있는데, 그건 `data` 안쪽 내용으로 읽으면 됩니다. `success`/`data`/`error` 세 필드는 항상 존재합니다.
 
+서비스는 예외를 던질 때 `throw new BusinessException(ErrorCode.X); // E40xx` 형태로 **주석에 코드 번호를 남기는 관례**가 있습니다(`RunningSessionService` 참고). 남의 리소스 접근은 404가 아니라 `FORBIDDEN`(E4030)입니다 — `getOwnedSession()`처럼 소유자 검사를 서비스 private 헬퍼로 빼세요.
+
 아직 없는 것:
 
-- **도메인 API 전체** — 홈, 러닝, 심박수, 회복 가이드, 프로필. 인증 기반이 완성됐으니 여기부터 반복 확장하면 됩니다.
+- **회복 가이드(recovery)** 도메인만 미착수(패키지 자체가 없음). 심박수·프로필 API는 구현 완료.
 - `RedisConfig` — `StringRedisTemplate` 자동 구성으로 충분해 아직 불필요합니다.
-- 이후 프로필 → 러닝 세션 → 심박수 → 회복 가이드 → 홈 대시보드(여러 도메인 종합이라 마지막) 순.
+- **러닝 진행 상태의 Redis 저장** — 원래 설계는 `/live`를 Redis로 받는 것이었지만, 현재 구현은 Postgres의 `running_sessions` 행을 직접 갱신합니다(아래 참고).
+
+### 러닝 / 홈 도메인에서 알아야 할 것
+
+- `GET /running-sessions/{id}/live`는 **GET인데 쓰기를 합니다.** 명세에 진행 중 갱신용 엔드포인트가 따로 없어, 쿼리 파라미터로 딸려온 `distanceKm`/`intensity`를 `updateLiveSnapshot()`으로 반영하는 upsert-on-read 방식입니다(`@Transactional` 붙어 있음). 갱신은 `IN_PROGRESS`일 때만 일어납니다.
+- `POST /running-sessions/{id}/end`는 **멱등**입니다. 이미 끝난 세션에 다시 호출하면 에러 대신 현재 상태를 그대로 돌려줍니다(명세에 전용 에러 코드가 없어서 내린 결정). 진행 중 세션이 있는데 새로 시작하면 `E4090`.
+- `running/external/`의 `MockUvIndexClient`·`MockLocationLabelResolver`는 **인터페이스 뒤에 있는 임시 구현**입니다. 실제 API(기상청/Open-Meteo, 카카오 로컬)를 붙일 때 새 `@Component`를 만들고 목의 `@Component`를 제거하세요. UV 지수 → 라벨("낮음"…"위험") 변환은 `UvIndexClient.UvIndexResult.of()` 한 곳에만 두고 재구현하지 마세요 — 홈 주간 요약도 이걸 씁니다.
+- `HomeService`의 주 단위는 **월요일 시작**(`TemporalAdjusters.previousOrSame(MONDAY)`)이고, "완료"는 `ENDED` + `COMPLETED` 둘 다입니다(`COMPLETED_STATUSES`). 새 집계를 추가할 땐 이 상수를 재사용하세요.
+- 홈 집계 쿼리는 `HomeService`가 아니라 리포지토리의 `@Query`(`sumDistanceKmBetween`, `avgBpmBetween`, `avgUvIndexBetween`)에 있습니다. **합계는 `coalesce(...,0)`로 0을, 평균은 null을 반환**하는 게 의도된 구분입니다(측정 없음 = null로 응답).
 
 ### JWT
 
@@ -172,9 +224,8 @@ public ApiResponse<HomeResponse> home(@AuthenticationPrincipal UUID userId) { ..
 
 ## 참고 문서
 
-`docs/`는 아직 git에 커밋되지 않은 상태(untracked)라 다른 사람이 클론하면 없습니다. 아래 참조는 이 워킹 트리 기준입니다.
-
+- `docs/API_명세.md` — 엔드포인트·요청/응답·공통 에러 코드 표. 새 API를 만들기 전에 여기부터.
 - `docs/프로젝트_컨텍스트_jungkathon3team.md` — 기술 선택 이유, 트러블슈팅 기록, 진행 체크리스트. "왜 이렇게 됐지?" 싶을 때 여기부터.
 - `docs/개발_시작_가이드.md` — 다음에 구현할 것(`common/`, 인증 순서, 테스트 전략)만 남긴 문서.
 - `docs/ERD_aftergrow.md` — DB 구조와 설계 의도.
-- `docs/백엔드_기술스택_노션용.md` — 스택 개요 및 AWS 배포 구상(미착수).
+- `docs/백엔드_기술스택_노션용.md` — 스택 개요 및 AWS 배포 구상. 배포 자체는 이 브랜치(`feature/deploy-pipeline`)에서 구현 완료 — 절차는 위 `## 배포` 절 참고.

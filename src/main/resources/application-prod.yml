@@ -1,0 +1,18 @@
+# 배포(prod 프로파일) 전용 설정입니다.
+#
+# datasource / redis 접속 정보는 docker-compose.prod.yml이 환경변수
+# (SPRING_DATASOURCE_URL 등)로 주입하므로 여기에 두지 않습니다.
+# jwt.secret도 값을 적지 않고 환경변수를 참조합니다 — 이 파일은 커밋됩니다.
+spring:
+  jpa:
+    hibernate:
+      # 엔티티와 Flyway 스키마가 어긋나면 기동 시점에 잡히도록 local/test와 동일하게 validate
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+jwt:
+  secret: ${JWT_SECRET}
+  access-token-expiration-ms: 3600000
+  refresh-token-expiration-ms: 2592000000

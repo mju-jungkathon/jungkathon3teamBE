@@ -6,8 +6,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # 0.0.0.0으로 공개하면 이 파일을 그대로 쓰는 EC2에서 실제 비밀번호가 걸린
+    # postgres가 보안 그룹이 허용하는 범위에 노출됩니다. 로컬 접속은 그대로 됩니다.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,8 +21,9 @@ services:
   redis:
     image: redis:7
     container_name: aftergrow-redis
+    # 마찬가지로 루프백에만 바인딩합니다.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

@@ -1,0 +1,74 @@
+name: Deploy
+
+# test.yml은 main 대상 PR에서 돌고, 이 워크플로는 main push(= 머지)에서 돕니다.
+# 트리거가 겹치지 않으므로 test.yml은 수정하지 않습니다.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 연달아 머지되면 두 실행이 같은 EC2 디렉터리에서 동시에 git pull → up -d를
+# 돌려 컨테이너 교체가 뒤섞일 수 있습니다. 같은 그룹으로 묶어 순차 실행시킵니다.
+# cancel-in-progress는 false로 둡니다 — up -d 도중에 취소하면 컨테이너가
+# 절반만 떠 있는 상태로 EC2가 남습니다.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      # EC2에 클론된 레포 경로. 비밀이 아니므로 시크릿이 아니라 여기에 둡니다.
+      EC2_APP_DIR: /home/ubuntu/jungkathon3teamBE
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: GHCR 로그인
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 이미지 빌드 & 푸시
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # latest는 EC2가 pull 할 대상, sha는 어느 커밋이 배포됐는지 확인하고
+          # 되돌리기 위한 것입니다.
+          tags: |
+            ghcr.io/mju-jungkathon/aftergrow:latest
+            ghcr.io/mju-jungkathon/aftergrow:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: EC2에 배포
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          # 중간 명령이 실패하면 거기서 멈춥니다. 없으면 pull이 실패해도
+          # 마지막 명령 결과만 보고 초록불이 됩니다.
+          script_stops: true
+          script: |
+            cd ${{ env.EC2_APP_DIR }}
+            # 이미지는 GHCR에서 오지만 compose 파일은 EC2의 것을 씁니다.
+            # 순서가 뒤바뀌면 낡은 compose로 새 이미지를 띄우게 됩니다.
+            git pull origin main
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            # up -d는 컨테이너를 띄우기만 하고 앱 기동을 기다리지 않습니다.
+            # 이 줄이 없으면 기동에 실패한 배포도 초록불이 됩니다.
+            timeout 180 sh -c 'until curl -fs localhost:8080/actuator/health; do sleep 3; done'
+            # :latest가 옮겨가면서 태그 없는 이전 이미지가 쌓입니다.
+            # t2.micro 기본 EBS는 8GB라 몇 주면 찹니다. 헬스체크 뒤에 지워야
+            # 실패했을 때 이전 이미지로 되돌릴 여지가 남습니다.
+            docker image prune -f
