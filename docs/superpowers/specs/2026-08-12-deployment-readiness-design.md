@@ -38,16 +38,36 @@ EC2는 t2/t3.micro(메모리 1GB)이고 postgres·redis·app이 같은 호스트
 push to main
    └─ GitHub Actions
         ├─ test.yml        (기존, 변경 없음)
-        └─ deploy.yml      (신규) → ghcr.io/mju-jungkathon/aftergrow:latest, :{sha}
+        └─ deploy.yml      (신규)
+             ├─ 1. 이미지 빌드 → ghcr.io/mju-jungkathon/aftergrow:latest, :{sha}
+             └─ 2. SSH로 EC2 접속 → git pull + compose pull + up -d + 헬스체크
                                        │
-EC2 (t2.micro)                         │  docker compose -f docker-compose.prod.yml pull && up -d
+EC2 (t2.micro)                         │
    └─ docker-compose.prod.yml ─────────┘
         ├─ app       ← GHCR 이미지 (빌드하지 않음), 8080만 공개
         ├─ postgres  ← 포트 미공개
         └─ redis     ← 포트 미공개
 ```
 
-배포 트리거는 **EC2에서 손으로 `pull` 하는 것**으로 둔다. Actions에서 SSH로 접속해 자동 배포하는 것은 SSH 키를 리포지토리 시크릿에 넣어야 하므로, 필요해질 때 별도로 추가한다.
+`main`에 머지되면 배포까지 자동으로 끝난다. EC2에 사람이 들어가는 것은 최초 1회 설정(3.1) 때뿐이다.
+
+### 3.1 EC2에 최초 1회만 필요한 것
+
+- `docker login ghcr.io` (PAT, `read:packages`) — GHCR 패키지가 private이므로 필요하다. 이 로그인은 `~/.docker/config.json`에 남아 이후 배포에서 재사용된다.
+- 레포 클론 — EC2는 이미지를 빌드하지 않지만 `docker-compose.prod.yml`은 필요하다. `git pull`로 이 파일만 최신으로 유지한다.
+- `.env` — 비밀값은 계속 EC2에만 둔다. 워크플로가 만들지 않는다.
+
+### 3.2 필요한 리포지토리 시크릿
+
+| 시크릿 | 값 |
+|---|---|
+| `EC2_HOST` | EC2 퍼블릭 IP 또는 도메인 |
+| `EC2_USER` | SSH 사용자 (Ubuntu AMI면 `ubuntu`) |
+| `EC2_SSH_KEY` | EC2 접속용 **개인키 전문** (`-----BEGIN ... KEY-----` 포함) |
+
+`.env`의 값(`JWT_SECRET`, DB 비밀번호)은 시크릿에 넣지 않는다. EC2에 이미 있고, 워크플로는 그 파일을 건드리지 않는다.
+
+**배포용 SSH 키는 EC2 생성 시 쓴 키를 재사용하지 말고 따로 만드는 것을 권한다.** Actions에 넣은 키가 노출되면 인스턴스 전체 접근 권한이 넘어가므로, 유출 시 그 키만 `authorized_keys`에서 지울 수 있어야 한다.
 
 ## 4. 추가되는 파일
 
@@ -180,6 +200,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      # EC2에 클론된 레포 경로. 비밀이 아니므로 시크릿이 아니라 여기에 둔다.
+      EC2_APP_DIR: /home/ubuntu/jungkathon3teamBE
     steps:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
@@ -196,9 +219,33 @@ jobs:
             ghcr.io/mju-jungkathon/aftergrow:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: EC2에 배포
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stops: true
+          script: |
+            cd ${{ env.EC2_APP_DIR }}
+            git pull origin main
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            timeout 90 sh -c 'until curl -fs localhost:8080/actuator/health; do sleep 3; done'
+            docker image prune -f
 ```
 
 `:latest`와 `:{sha}` 두 개를 붙인다. `latest`는 EC2가 `pull` 할 대상이고, `{sha}`는 배포된 것이 어느 커밋인지 확인하고 되돌릴 수 있게 하기 위한 것이다.
+
+SSH 스크립트에서 결정한 것들:
+
+- **`script_stops: true`** — 중간 명령이 실패하면 거기서 멈추고 워크플로가 빨간불이 된다. 없으면 `pull`이 실패해도 마지막 명령의 결과만 보고 성공으로 끝난다.
+- **`git pull`이 먼저다.** 이미지는 GHCR에서 오지만 `docker-compose.prod.yml`은 EC2의 파일을 쓴다. compose를 고친 배포에서 순서가 뒤바뀌면 낡은 compose로 새 이미지를 띄우게 된다.
+- **`timeout 90 ... until curl`** — `up -d`는 컨테이너를 띄우기만 하고 앱이 뜰 때까지 기다리지 않는다. 이 줄이 없으면 기동에 실패한 배포도 초록불이 된다. 90초 안에 `/actuator/health`가 200을 주지 못하면 배포가 실패로 끝난다. 6절에서 actuator를 여는 이유가 여기서 처음으로 자동화에 쓰인다.
+- **`docker image prune -f`** — `:latest` 태그가 매 배포마다 옮겨가면서 이전 이미지가 태그 없이 쌓인다. t2.micro의 기본 EBS는 8GB라 몇 주면 디스크가 찬다. 헬스체크가 끝난 뒤에 지워야 롤백 여지가 남는다.
+
+`EC2_APP_DIR`은 비밀이 아니므로 시크릿이 아니라 워크플로 `env`에 둔다. 값은 EC2의 레포 경로다.
 
 `test.yml`은 `main` 대상 PR에서 돌고 `deploy.yml`은 `main` push(= 머지)에서 돈다. 트리거가 겹치지 않으므로 `test.yml`은 수정하지 않는다.
 
@@ -270,12 +317,16 @@ Dockerfile·compose·워크플로는 자동 테스트 대상이 아니다. 검�
 7. `docker compose -f docker-compose.prod.yml up -d`
 8. `curl localhost:8080/actuator/health` → `{"status":"UP"}` 확인.
 9. 보안 그룹에서 5432·6379가 열려 있으면 닫는다. prod compose는 두 포트를 공개하지 않지만, 기존 설정이 남아 있을 수 있다.
+10. 배포용 SSH 키를 만들어 공개키를 EC2의 `~/.ssh/authorized_keys`에 넣고, 개인키를 리포지토리 시크릿 `EC2_SSH_KEY`에 등록한다. `EC2_HOST`·`EC2_USER`도 함께 넣는다(3.2 참고).
 
-이후 배포는 6~7번 두 줄이다.
+**이후 배포는 `main`에 머지하는 것으로 끝난다.** 워크플로가 SSH로 들어가 `git pull` → `compose pull` → `up -d` → 헬스체크까지 수행한다. 사람이 EC2에 들어갈 일은 `.env`를 고칠 때뿐이다.
+
+배포가 실패하면 워크플로 로그에 어느 명령에서 멈췄는지 남는다. 헬스체크 단계에서 실패했다면 EC2에서 `docker compose -f docker-compose.prod.yml logs app`을 본다.
 
 ## 10. 남는 것 (이번 범위 밖)
 
-- **배포 자동화** — Actions에서 SSH로 EC2에 접속해 `pull`까지 하는 단계. SSH 키를 시크릿에 넣어야 하므로 분리한다.
+- **무중단 배포** — `up -d`는 기존 컨테이너를 내리고 새로 띄우므로 수십 초 끊긴다. 단일 인스턴스에서는 피할 수 없다.
+- **롤백 자동화** — 헬스체크 실패 시 이전 이미지로 되돌리는 단계는 없다. `:{sha}` 태그가 남아 있으므로 수동으로는 가능하다.
 - **HTTPS / 도메인 / ALB** — 지금은 EC2의 8080을 직접 노출한다. ALB를 붙이면 `/actuator/health`를 타깃 그룹 헬스체크로 연결하고, 그때 compose에도 app healthcheck를 추가한다.
 - **DB 백업** — `pgdata`는 EC2 로컬 볼륨 하나뿐이다. 인스턴스를 잃으면 데이터도 잃는다.
 - **로그 수집** — 컨테이너 stdout뿐이다.
@@ -285,6 +336,7 @@ Dockerfile·compose·워크플로는 자동 테스트 대상이 아니다. 검�
 - `./gradlew test` 통과 (신규 actuator 테스트 포함)
 - `docker build .` 성공
 - `main` 머지 후 GHCR에 `:latest`와 `:{sha}` 태그가 올라옴
+- 같은 워크플로 실행이 EC2 배포와 헬스체크까지 초록불로 끝남
 - EC2에서 `curl localhost:8080/actuator/health`가 `{"status":"UP"}`
 - EC2 외부에서 5432 접속이 거부됨
 - 로그인 → `/home` 호출이 배포된 서버에서 정상 동작

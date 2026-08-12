@@ -4,7 +4,7 @@
 
 **Goal:** EC2에만 존재하던 배포 산출물(Dockerfile, compose, prod 설정)을 레포로 옮기고, `/actuator/health`를 인증 없이 열어 헬스체크가 동작하게 한다.
 
-**Architecture:** 이미지 빌드는 GitHub Actions 러너에서만 수행하고 GHCR에 올린다. EC2(t2.micro, 1GB)는 완성된 이미지를 `pull` 하기만 한다 — 1GB 호스트에서 Gradle 빌드를 돌리면 같은 호스트의 postgres·app이 OOM으로 종료될 수 있기 때문이다. 로컬 개발용 `docker-compose.yml`은 건드리지 않고 배포용 `docker-compose.prod.yml`을 따로 둔다.
+**Architecture:** 이미지 빌드는 GitHub Actions 러너에서만 수행하고 GHCR에 올린 뒤, 같은 워크플로가 SSH로 EC2에 들어가 `pull` + `up -d` + 헬스체크까지 수행한다. EC2(t2.micro, 1GB)는 빌드하지 않는다 — 1GB 호스트에서 Gradle 빌드를 돌리면 같은 호스트의 postgres·app이 OOM으로 종료될 수 있기 때문이다. 로컬 개발용 `docker-compose.yml`은 건드리지 않고 배포용 `docker-compose.prod.yml`을 따로 둔다.
 
 **Tech Stack:** Java 17, Spring Boot 4.0.7, Spring Security 7.0.6, Gradle 9.5.1 (wrapper), Docker / Docker Compose, GitHub Actions, GHCR.
 
@@ -484,10 +484,65 @@ git commit -m "chore: EC2 배포용 docker-compose.prod.yml 추가"
 - Create: `.github/workflows/deploy.yml`
 
 **Interfaces:**
-- Consumes: Task 2의 `Dockerfile`
-- Produces: `ghcr.io/mju-jungkathon/aftergrow:latest` 와 `:{sha}` 태그. Task 4의 compose가 `:latest`를 받는다.
+- Consumes: Task 2의 `Dockerfile`, Task 4의 `docker-compose.prod.yml`(EC2에서 실행됨)
+- Produces: `ghcr.io/mju-jungkathon/aftergrow:latest` 와 `:{sha}` 태그, 그리고 EC2에 배포된 스택. Task 7이 이 워크플로가 성공하는지 확인한다.
+- 필요한 리포지토리 시크릿: `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY` (Step 2에서 등록)
 
-- [ ] **Step 1: 워크플로를 만든다**
+- [ ] **Step 1: EC2의 레포 경로를 확인한다**
+
+워크플로에 박아 넣어야 하므로 먼저 알아야 한다. EC2에 SSH로 접속해:
+
+```bash
+find ~ -maxdepth 3 -name docker-compose.yml -printf '%h\n'
+```
+
+Expected: `/home/ubuntu/jungkathon3teamBE`. Step 3의 워크플로에 이 값이 이미 적혀 있으므로 **다르게 나오면 워크플로의 `EC2_APP_DIR`을 실제 값으로 고친다.**
+
+- [ ] **Step 2: 배포용 SSH 키를 만들고 시크릿을 등록한다**
+
+**EC2 접속에 쓰던 기존 키를 재사용하지 않는다.** Actions에 넣은 키가 노출되면 인스턴스 전체 접근이 넘어가므로, 유출 시 그 키만 `authorized_keys`에서 지울 수 있어야 한다.
+
+로컬에서 키를 만든다 (passphrase 없이 — 워크플로가 입력할 수 없다):
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/aftergrow_deploy -N "" -C "github-actions-deploy"
+```
+
+공개키를 EC2에 등록한다. `<EC2_IP>`와 기존 키 경로는 본인 값으로:
+
+```bash
+ssh -i ~/.ssh/<기존키>.pem ubuntu@<EC2_IP> "echo '$(cat ~/.ssh/aftergrow_deploy.pub)' >> ~/.ssh/authorized_keys"
+```
+
+새 키로 접속되는지 먼저 확인한다:
+
+```bash
+ssh -i ~/.ssh/aftergrow_deploy ubuntu@<EC2_IP> "echo OK"
+```
+
+Expected: `OK`. 실패하면 시크릿을 등록하기 전에 여기서 해결한다.
+
+시크릿 세 개를 등록한다:
+
+```bash
+gh secret set EC2_HOST --body "<EC2 퍼블릭 IP 또는 도메인>"
+gh secret set EC2_USER --body "ubuntu"
+gh secret set EC2_SSH_KEY < ~/.ssh/aftergrow_deploy
+```
+
+`EC2_SSH_KEY`는 **개인키 전문**(`-----BEGIN OPENSSH PRIVATE KEY-----` 포함)이라 `--body` 대신 파일 리다이렉트를 쓴다.
+
+등록을 확인한다:
+
+```bash
+gh secret list
+```
+
+Expected: `EC2_HOST`, `EC2_SSH_KEY`, `EC2_USER` 세 개가 보인다.
+
+- [ ] **Step 3: 워크플로를 만든다**
+
+`EC2_APP_DIR`은 Step 1에서 확인한 값으로 바꾼다.
 
 ```yaml
 name: Deploy
@@ -505,6 +560,10 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+    env:
+      # EC2에 클론된 레포 경로. 비밀이 아니므로 시크릿이 아니라 여기에 둡니다.
+      EC2_APP_DIR: /home/ubuntu/jungkathon3teamBE
 
     steps:
       - uses: actions/checkout@v4
@@ -528,19 +587,45 @@ jobs:
             ghcr.io/mju-jungkathon/aftergrow:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: EC2에 배포
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          # 중간 명령이 실패하면 거기서 멈춥니다. 없으면 pull이 실패해도
+          # 마지막 명령 결과만 보고 초록불이 됩니다.
+          script_stops: true
+          script: |
+            cd ${{ env.EC2_APP_DIR }}
+            # 이미지는 GHCR에서 오지만 compose 파일은 EC2의 것을 씁니다.
+            # 순서가 뒤바뀌면 낡은 compose로 새 이미지를 띄우게 됩니다.
+            git pull origin main
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            # up -d는 컨테이너를 띄우기만 하고 앱 기동을 기다리지 않습니다.
+            # 이 줄이 없으면 기동에 실패한 배포도 초록불이 됩니다.
+            timeout 90 sh -c 'until curl -fs localhost:8080/actuator/health; do sleep 3; done'
+            # :latest가 옮겨가면서 태그 없는 이전 이미지가 쌓입니다.
+            # t2.micro 기본 EBS는 8GB라 몇 주면 찹니다. 헬스체크 뒤에 지워야
+            # 실패했을 때 이전 이미지로 되돌릴 여지가 남습니다.
+            docker image prune -f
 ```
 
-- [ ] **Step 2: YAML이 파싱되는지 확인한다**
+- [ ] **Step 4: 워크플로 문법을 검사한다**
 
-들여쓰기 실수는 머지 후에야 발견되므로 미리 본다.
+**깨진 워크플로는 `main`에 머지된 뒤에야 발견된다.** actionlint로 미리 잡는다 — YAML 문법뿐 아니라 잘못된 `uses:` 참조와 시크릿/컨텍스트 오타까지 본다. Docker로 돌리므로 설치할 것은 없다 (Task 2~4에서 이미 Docker를 쓰고 있다).
 
 ```bash
-python -c "import yaml,sys; yaml.safe_load(open('.github/workflows/deploy.yml')); print('OK')"
+docker run --rm -v "$(pwd):/repo" --workdir /repo rhysd/actionlint:latest -color
 ```
 
-Expected: `OK`
+Expected: 출력 없음(= 문제 없음). `deploy.yml`과 기존 `test.yml` 둘 다 검사된다.
 
-python이 없으면 이 단계를 건너뛰고 Step 4의 GitHub 확인에 의존한다.
+`${{ secrets.EC2_* }}`에 대한 경고가 나오면 Task 5 Step 2에서 시크릿을 등록했는지 확인한다 — actionlint는 시크릿 존재 여부를 알 수 없으므로 이 경고는 무시해도 된다.
+
+Windows PowerShell에서는 `$(pwd)` 대신 `${PWD}`를 쓴다.
 
 - [ ] **Step 3: 커밋하고 푸시한다**
 
@@ -601,17 +686,25 @@ Expected: `test.yml`이 돌아 통과한다. `deploy.yml`은 PR에서는 돌지 
 ```markdown
 ## 배포
 
-이미지는 **GitHub Actions에서만 빌드**합니다. `main`에 머지되면 `.github/workflows/deploy.yml`이 `ghcr.io/mju-jungkathon/aftergrow`에 `:latest`와 `:{sha}`를 올립니다.
+**`main`에 머지하면 배포까지 자동으로 끝납니다.** `.github/workflows/deploy.yml`이 이미지를 빌드해 `ghcr.io/mju-jungkathon/aftergrow`에 `:latest`·`:{sha}`로 올린 뒤, SSH로 EC2에 들어가 `git pull` → `compose pull` → `up -d` → 헬스체크까지 수행합니다. 헬스체크가 90초 안에 200을 주지 못하면 워크플로가 실패합니다.
 
 **EC2(t2.micro, 1GB)에서 `docker build`나 `./gradlew build`를 돌리지 마세요.** postgres·redis·app이 같은 호스트에 있어서, Gradle이 메모리를 다 쓰면 돌아가던 컨테이너가 OOM killer에 종료됩니다. EC2가 하는 일은 pull 뿐입니다.
 
+**배포 때마다 수십 초 끊깁니다** — `up -d`가 컨테이너를 내렸다 새로 띄웁니다. 시연 중에는 `main`에 머지하지 마세요.
+
+수동으로 배포해야 할 때(워크플로가 막혔을 때)만 EC2에서:
+
 ```bash
+cd /home/ubuntu/jungkathon3teamBE
+git pull origin main
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 curl localhost:8080/actuator/health     # {"status":"UP"}
 ```
 
+- **EC2에서 파일을 직접 고치지 마세요.** 고쳐도 다음 배포의 `git pull`에서 막히거나 덮어써집니다. 문제 3이 그렇게 생겼습니다.
 - `docker-compose.yml`은 **로컬 개발용**(postgres·redis만), `docker-compose.prod.yml`이 **배포용**(app 포함)입니다. override 체인은 쓰지 않습니다.
+- 리포지토리 시크릿 `EC2_HOST`·`EC2_USER`·`EC2_SSH_KEY`가 배포에 쓰입니다. EC2를 재생성하면 셋 다 갱신해야 합니다.
 - prod compose는 postgres·redis 포트를 공개하지 않습니다. app의 8080만 열립니다.
 - GHCR 패키지는 private이라 EC2에서 최초 1회 `docker login ghcr.io`(PAT, `read:packages`)가 필요합니다.
 - **DB 볼륨을 지우지 않도록 `docker compose down -v`를 쓰지 마세요.**
@@ -628,31 +721,37 @@ git push
 
 ---
 
-## Task 7: EC2 전환
+## Task 7: EC2 전환 (최초 1회)
 
-설계 문서 §9에 해당한다. **PR이 `main`에 머지되고 `deploy.yml`이 GHCR에 이미지를 올린 뒤에** 수행한다.
+설계 문서 §9에 해당한다. **PR이 `main`에 머지된 뒤에** 수행한다.
+
+> **머지 직후 `Deploy` 워크플로의 첫 실행은 SSH 단계에서 실패하는 것이 정상이다.** 이미지 빌드·푸시는 성공하지만, EC2가 아직 GHCR 로그인도 새 compose도 없는 상태라 배포 단계가 멈춘다. **EC2에는 아무 변화도 일어나지 않으므로 안전하다** — 이 태스크가 EC2를 준비시키고, Step 10에서 워크플로를 다시 돌려 자동 경로가 끝까지 도는 것을 확인한다.
+>
+> 첫 실행을 빨간불로 남기고 싶지 않다면 Task 5 Step 2(시크릿 등록)와 이 태스크의 Step 3~9를 머지 전에 미리 해둬도 된다. 그 경우 EC2에서 `git checkout feature/deploy-pipeline`으로 compose 파일을 먼저 받아야 한다.
 
 **Files:** 없음 (EC2에서 실행하는 절차)
 
 **Interfaces:**
-- Consumes: Task 4의 `docker-compose.prod.yml`, Task 5가 올린 GHCR 이미지
+- Consumes: Task 4의 `docker-compose.prod.yml`, Task 5가 올린 GHCR 이미지와 등록된 시크릿
+- Produces: 새 스택으로 돌아가는 EC2. 이후 배포는 `main` 머지만으로 자동 수행된다
 
 - [ ] **Step 1: 이미지가 GHCR에 올라갔는지 확인한다**
 
-머지 후 GitHub의 Actions 탭에서 `Deploy` 워크플로가 초록인지, 리포지토리 Packages에 `aftergrow`가 보이는지 확인한다.
-
 ```bash
 gh run list --workflow=Deploy --limit 3
+gh run view --log-failed | tail -20
 ```
 
-Expected: 최신 실행이 `completed  success`.
+Expected: 최신 실행이 실패했더라도 **`이미지 빌드 & 푸시` 단계는 성공**이고, 실패한 단계가 `EC2에 배포`다. 리포지토리 Packages에 `aftergrow`가 보이는지도 확인한다.
+
+빌드 단계에서 실패했다면 EC2를 건드리기 전에 그것부터 고친다.
 
 - [ ] **Step 2: EC2에서 기존 설정을 백업한다**
 
 되돌릴 수 있어야 한다. EC2에 SSH로 접속해 실행한다.
 
 ```bash
-cd ~/aftergrow      # 실제 경로로
+cd /home/ubuntu/jungkathon3teamBE
 cp docker-compose.yml ~/backup-compose.yml
 cp Dockerfile ~/backup-Dockerfile 2>/dev/null || true
 ```
@@ -667,10 +766,34 @@ echo <PAT> | docker login ghcr.io -u <github-username> --password-stdin
 
 Expected: `Login Succeeded`
 
-- [ ] **Step 4: 레포를 받고 `.env`를 확인한다**
+- [ ] **Step 4: 손으로 고친 파일을 정리하고 레포를 받는다**
+
+**이 단계에서 막힐 가능성이 가장 높다.** 문제 3의 원인이 EC2에서 `docker-compose.yml`을 직접 고친 것이므로, 그 로컬 수정이 `git pull`을 막는다. 먼저 확인한다.
 
 ```bash
+git status --short
+```
+
+`M docker-compose.yml` 같은 줄이 보이면, Step 2에서 백업했으므로 그 수정을 버린다. 앞으로 이 파일은 로컬 개발용이고 EC2가 쓰는 것은 `docker-compose.prod.yml`이다.
+
+```bash
+git checkout -- docker-compose.yml
+git status --short          # 다른 수정 파일이 더 있으면 각각 판단한다
+```
+
+브랜치가 `main`인지 확인하고 받는다. 자동 배포 스크립트도 `git pull origin main`을 쓰므로 여기서 맞춰둬야 한다.
+
+```bash
+git branch --show-current   # main 이 아니면 git checkout main
 git pull origin main
+ls docker-compose.prod.yml  # 파일이 실제로 왔는지 확인
+```
+
+Expected: `docker-compose.prod.yml`이 보인다.
+
+이어서 `.env`를 확인한다.
+
+```bash
 grep -c JWT_SECRET .env
 ```
 
@@ -736,6 +859,41 @@ curl -s localhost:8080/home -H "Authorization: Bearer <accessToken>"
 
 Expected: `"success": true`.
 
+- [ ] **Step 10: 자동 배포가 끝까지 도는지 확인한다**
+
+여기까지는 손으로 한 것이라 자동 경로가 동작한다는 증거가 아직 없다. Step 1에서 실패했던 워크플로를 다시 돌려 확인한다. 로컬에서:
+
+```bash
+gh run list --workflow=Deploy --limit 1
+gh run rerun <run-id> --failed
+gh run watch
+```
+
+Expected: `EC2에 배포` 단계까지 초록. 이 단계가 성공했다는 것은 SSH 접속 → `git pull` → `compose pull` → `up -d` → 헬스체크 200이 전부 통과했다는 뜻이다.
+
+**여기서 실패하면 그 사유가 자동 배포의 실제 결함이다.** 자주 나오는 것:
+
+| 로그에 보이는 것 | 원인 |
+|---|---|
+| `Permission denied (publickey)` | `EC2_SSH_KEY` 시크릿이 개인키 전문이 아니거나 공개키가 `authorized_keys`에 없다 |
+| `denied: ... unauthorized` | EC2의 `docker login ghcr.io`가 안 됐거나 PAT가 만료됐다 (Step 3) |
+| `cd: no such file or directory` | 워크플로의 `EC2_APP_DIR`이 실제 경로와 다르다 (Task 5 Step 1) |
+| `timeout ... until curl` 에서 멈춤 | 앱이 90초 안에 뜨지 못했다. EC2에서 `docker compose -f docker-compose.prod.yml logs app` |
+
+- [ ] **Step 11: 배포가 실제로 반영되는지 한 번 확인한다**
+
+워크플로가 초록이어도 "새 이미지가 실제로 반영되는가"는 아직 확인되지 않았다. 사소한 변경 하나로 확인한다.
+
+`README.md`에 한 줄을 더하고 `main`에 머지한 뒤, 배포된 이미지의 커밋이 바뀌는지 본다.
+
+```bash
+gh run watch                                    # Deploy가 초록으로 끝날 때까지
+ssh -i ~/.ssh/aftergrow_deploy ubuntu@<EC2_IP> \
+  "docker inspect aftergrow-app --format '{{.Config.Image}}' && cd /home/ubuntu/jungkathon3teamBE && git log --oneline -1"
+```
+
+Expected: EC2의 최신 커밋이 방금 머지한 커밋이고, 컨테이너가 새로 뜬 상태다.
+
 ---
 
 ## 완료 기준
@@ -745,10 +903,14 @@ Expected: `"success": true`.
 - [ ] `./gradlew test` 통과 (신규 actuator 테스트 포함)
 - [ ] `docker build .` 성공
 - [ ] `main` 머지 후 GHCR에 `:latest`와 `:{sha}` 태그가 올라감
+- [ ] `Deploy` 워크플로가 `EC2에 배포` 단계까지 초록으로 끝남
 - [ ] EC2에서 `curl localhost:8080/actuator/health` → `{"status":"UP"}`
 - [ ] EC2 외부에서 5432 접속이 거부됨
 - [ ] 로그인 → `/home` 호출이 배포된 서버에서 정상 동작
+- [ ] `main`에 머지하면 사람 개입 없이 EC2에 반영됨 (Task 7 Step 11)
 
 ## 이번 범위 밖
 
-설계 문서 §10 참고. 배포 자동화(Actions → SSH), HTTPS/ALB, DB 백업, 로그 수집은 별도 작업이다.
+설계 문서 §10 참고. 무중단 배포, 롤백 자동화, HTTPS/ALB, DB 백업, 로그 수집은 별도 작업이다.
+
+`up -d`는 기존 컨테이너를 내리고 새로 띄우므로 **배포 때마다 수십 초 끊긴다.** 단일 인스턴스에서는 피할 수 없다. 시연 중에 `main`에 머지하지 않도록 주의한다.
