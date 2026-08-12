@@ -110,6 +110,10 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    # Dockerfile의 -XX:MaxRAMPercentage=50.0이 의미를 갖게 하는 값이다.
+    # 이 제한이 없으면 JVM이 호스트의 1GB를 읽어 힙을 512MB까지 늘린다 —
+    # postgres·redis가 같은 1GB를 나눠 쓰는 상황에서 OOM killer를 부른다.
+    mem_limit: 512m
     environment:
       SPRING_PROFILES_ACTIVE: prod
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
@@ -194,6 +198,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# 동시에 두 배포가 같은 디렉터리에서 up -d 하는 것을 막는다.
+# 취소는 끈다 — up -d 도중에 죽이면 절반만 배포된 상태로 남는다.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -232,7 +242,7 @@ jobs:
             git pull origin main
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d
-            timeout 90 sh -c 'until curl -fs localhost:8080/actuator/health; do sleep 3; done'
+            timeout 180 sh -c 'until curl -fs localhost:8080/actuator/health; do sleep 3; done'
             docker image prune -f
 ```
 
@@ -242,7 +252,8 @@ SSH 스크립트에서 결정한 것들:
 
 - **`script_stops: true`** — 중간 명령이 실패하면 거기서 멈추고 워크플로가 빨간불이 된다. 없으면 `pull`이 실패해도 마지막 명령의 결과만 보고 성공으로 끝난다.
 - **`git pull`이 먼저다.** 이미지는 GHCR에서 오지만 `docker-compose.prod.yml`은 EC2의 파일을 쓴다. compose를 고친 배포에서 순서가 뒤바뀌면 낡은 compose로 새 이미지를 띄우게 된다.
-- **`timeout 90 ... until curl`** — `up -d`는 컨테이너를 띄우기만 하고 앱이 뜰 때까지 기다리지 않는다. 이 줄이 없으면 기동에 실패한 배포도 초록불이 된다. 90초 안에 `/actuator/health`가 200을 주지 못하면 배포가 실패로 끝난다. 6절에서 actuator를 여는 이유가 여기서 처음으로 자동화에 쓰인다.
+- **`timeout 180 ... until curl`** — `up -d`는 컨테이너를 띄우기만 하고 앱이 뜰 때까지 기다리지 않는다. 이 줄이 없으면 기동에 실패한 배포도 초록불이 된다. 180초 안에 `/actuator/health`가 200을 주지 못하면 배포가 실패로 끝난다. 6절에서 actuator를 여는 이유가 여기서 처음으로 자동화에 쓰인다. 버스터블 vCPU 1개에서 Boot 4 + Flyway 콜드 스타트는 60~90초가 정상이라 여유를 둔다 — 헛된 타임아웃은 뒤따르는 `docker image prune`까지 건너뛰어 8GB 볼륨에 이미지를 쌓는다.
+- **`concurrency: {group: deploy, cancel-in-progress: false}`** — 1분 간격으로 두 번 머지하면 두 실행이 같은 디렉터리에서 `git pull`과 `up -d`를 교차 실행한다. 취소를 끄는 이유는 `up -d` 도중에 죽이면 박스가 절반만 배포된 상태로 남기 때문이다.
 - **`docker image prune -f`** — `:latest` 태그가 매 배포마다 옮겨가면서 이전 이미지가 태그 없이 쌓인다. t2.micro의 기본 EBS는 8GB라 몇 주면 디스크가 찬다. 헬스체크가 끝난 뒤에 지워야 롤백 여지가 남는다.
 
 `EC2_APP_DIR`은 비밀이 아니므로 시크릿이 아니라 워크플로 `env`에 둔다. 값은 EC2의 레포 경로다.

@@ -610,7 +610,7 @@ jobs:
             docker compose -f docker-compose.prod.yml up -d
             # up -d는 컨테이너를 띄우기만 하고 앱 기동을 기다리지 않습니다.
             # 이 줄이 없으면 기동에 실패한 배포도 초록불이 됩니다.
-            timeout 90 sh -c 'until curl -fs localhost:8080/actuator/health; do sleep 3; done'
+            timeout 180 sh -c 'until curl -fs localhost:8080/actuator/health; do sleep 3; done'
             # :latest가 옮겨가면서 태그 없는 이전 이미지가 쌓입니다.
             # t2.micro 기본 EBS는 8GB라 몇 주면 찹니다. 헬스체크 뒤에 지워야
             # 실패했을 때 이전 이미지로 되돌릴 여지가 남습니다.
@@ -692,7 +692,7 @@ Expected: `test.yml`이 돌아 통과한다. `deploy.yml`은 PR에서는 돌지 
 ```markdown
 ## 배포
 
-**`main`에 머지하면 배포까지 자동으로 끝납니다.** `.github/workflows/deploy.yml`이 이미지를 빌드해 `ghcr.io/mju-jungkathon/aftergrow`에 `:latest`·`:{sha}`로 올린 뒤, SSH로 EC2에 들어가 `git pull` → `compose pull` → `up -d` → 헬스체크까지 수행합니다. 헬스체크가 90초 안에 200을 주지 못하면 워크플로가 실패합니다.
+**`main`에 머지하면 배포까지 자동으로 끝납니다.** `.github/workflows/deploy.yml`이 이미지를 빌드해 `ghcr.io/mju-jungkathon/aftergrow`에 `:latest`·`:{sha}`로 올린 뒤, SSH로 EC2에 들어가 `git pull` → `compose pull` → `up -d` → 헬스체크까지 수행합니다. 헬스체크가 180초 안에 200을 주지 못하면 워크플로가 실패합니다.
 
 **EC2(t2.micro, 1GB)에서 `docker build`나 `./gradlew build`를 돌리지 마세요.** postgres·redis·app이 같은 호스트에 있어서, Gradle이 메모리를 다 쓰면 돌아가던 컨테이너가 OOM killer에 종료됩니다. EC2가 하는 일은 pull 뿐입니다.
 
