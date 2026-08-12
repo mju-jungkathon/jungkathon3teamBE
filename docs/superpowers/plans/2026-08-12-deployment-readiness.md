@@ -111,7 +111,9 @@ docker compose up -d
 ./gradlew test --tests '*SecurityConfigTest'
 ```
 
-Expected: FAIL. `헬스체크는_인증_없이_열린다`가 `Status expected:<200> but was:<404>`로 실패한다 (actuator 엔드포인트 자체가 없다). 나머지 두 테스트는 통과한다.
+Expected: FAIL. `헬스체크는_인증_없이_열린다`가 `Status expected:<200> but was:<401>`로 실패한다. 나머지 두 테스트는 통과한다.
+
+**404가 아니라 401이다.** `AuthorizationFilter`가 `DispatcherServlet`보다 앞에 있어서, 공개 경로가 아닌 URL은 핸들러 매핑까지 가지 못하고 401로 끊긴다. 엔드포인트가 존재하는지 여부와 무관하다.
 
 - [ ] **Step 3: actuator 의존성을 추가한다**
 
@@ -124,13 +126,15 @@ Expected: FAIL. `헬스체크는_인증_없이_열린다`가 `Status expected:<2
 
 **버전을 적지 않는다.** `io.spring.dependency-management` 플러그인이 Boot 4.0.7 BOM에서 가져온다.
 
-- [ ] **Step 4: 이제 401로 실패하는지 확인한다**
+- [ ] **Step 4: 여전히 실패하는지 확인한다**
 
 ```bash
 ./gradlew test --tests '*SecurityConfigTest'
 ```
 
-Expected: 여전히 FAIL, 단 사유가 바뀐다 — `Status expected:<200> but was:<401>`. 엔드포인트는 생겼지만 `anyRequest().authenticated()`에 걸린 상태다. **404가 아니라 401이 나오는 것을 눈으로 확인하고 다음 단계로 간다.**
+Expected: 여전히 FAIL, `Status expected:<200> but was:<401>`. 엔드포인트는 생겼지만 `anyRequest().authenticated()`에 걸린 상태다. **상태 코드는 Step 2와 같다** — 시큐리티가 먼저 끊기 때문에 의존성 유무가 응답에 드러나지 않는다. 여기서 확인할 것은 "여전히 실패한다"뿐이다.
+
+테스트가 두 절반을 모두 지킨다는 성질은 그대로다. 나중에 한쪽만 깨지면 각각 다른 코드로 잡힌다 — 의존성만 빠지면 경로는 공개 상태이므로 404, `PUBLIC_PATHS`에서만 빠지면 401이다.
 
 - [ ] **Step 5: `PUBLIC_PATHS`에 헬스체크를 추가한다**
 
@@ -618,10 +622,12 @@ jobs:
 **깨진 워크플로는 `main`에 머지된 뒤에야 발견된다.** actionlint로 미리 잡는다 — YAML 문법뿐 아니라 잘못된 `uses:` 참조와 시크릿/컨텍스트 오타까지 본다. Docker로 돌리므로 설치할 것은 없다 (Task 2~4에서 이미 Docker를 쓰고 있다).
 
 ```bash
-docker run --rm -v "$(pwd):/repo" --workdir /repo rhysd/actionlint:latest -color
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd):/repo" --workdir /repo rhysd/actionlint:latest -color
 ```
 
-Expected: 출력 없음(= 문제 없음). `deploy.yml`과 기존 `test.yml` 둘 다 검사된다.
+Expected: 출력 없음(= 문제 없음), 종료 코드 0. `deploy.yml`과 기존 `test.yml` 둘 다 검사된다.
+
+`MSYS_NO_PATHCONV=1`은 Windows Git Bash용이다. 없으면 Git Bash가 `/repo`를 윈도우 경로로 바꿔버려 컨테이너가 파일을 못 찾는다. macOS·Linux에서는 붙이지 않아도 된다.
 
 `${{ secrets.EC2_* }}`에 대한 경고가 나오면 Task 5 Step 2에서 시크릿을 등록했는지 확인한다 — actionlint는 시크릿 존재 여부를 알 수 없으므로 이 경고는 무시해도 된다.
 
