@@ -60,8 +60,8 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           # 중간 명령이 실패하면 거기서 멈춥니다. 없으면 pull이 실패해도
           # 마지막 명령 결과만 보고 초록불이 됩니다.
-          script_stops: true
           script: |
+            set -e
             cd ${{ env.EC2_APP_DIR }}
             # 이미지는 GHCR에서 오지만 compose 파일은 EC2의 것을 씁니다.
             # 순서가 뒤바뀌면 낡은 compose로 새 이미지를 띄우게 됩니다.
