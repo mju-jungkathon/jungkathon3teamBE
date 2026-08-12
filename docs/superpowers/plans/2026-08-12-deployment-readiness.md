@@ -731,7 +731,7 @@ git push
 
 설계 문서 §9에 해당한다. **PR이 `main`에 머지된 뒤에** 수행한다.
 
-> **머지 직후 `Deploy` 워크플로의 첫 실행은 SSH 단계에서 실패하는 것이 정상이다.** 이미지 빌드·푸시는 성공하지만, EC2가 아직 GHCR 로그인도 새 compose도 없는 상태라 배포 단계가 멈춘다. **EC2에는 아무 변화도 일어나지 않으므로 안전하다** — 이 태스크가 EC2를 준비시키고, Step 10에서 워크플로를 다시 돌려 자동 경로가 끝까지 도는 것을 확인한다.
+> **머지 직후 `Deploy` 워크플로의 첫 실행은 SSH 단계에서 실패하는 것이 정상이다.** 이미지 빌드·푸시는 성공하지만, EC2가 아직 GHCR 로그인도 새 compose도 없는 상태라 배포 단계가 멈춘다. **EC2에는 아무 변화도 일어나지 않으므로 안전하다** — 이 태스크가 EC2를 준비시키고, Step 11에서 워크플로를 다시 돌려 자동 경로가 끝까지 도는 것을 확인한다.
 >
 > 첫 실행을 빨간불로 남기고 싶지 않다면 Task 5 Step 2(시크릿 등록)와 이 태스크의 Step 3~9를 머지 전에 미리 해둬도 된다. 그 경우 EC2에서 `git checkout feature/deploy-pipeline`으로 compose 파일을 먼저 받아야 한다.
 
@@ -805,7 +805,30 @@ grep -c JWT_SECRET .env
 
 Expected: `1`. `0`이면 `.env`에 `JWT_SECRET=<32자 이상의 임의 문자열>`을 추가한다. `POSTGRES_DB`/`POSTGRES_USER`/`POSTGRES_PASSWORD`도 있는지 함께 확인한다.
 
-- [ ] **Step 5: 기존 스택을 내린다**
+- [ ] **Step 5: 전환 전 DB 상태를 확인하고 백업한다**
+
+**이 브랜치의 전제는 EC2의 `docker-compose.yml`이 손으로 고쳐진 뒤 한 번도 커밋되지 않았다는 것이다** — 즉 지금 postgres가 실제로 어떤 볼륨(또는 바인드 마운트)을 쓰고 있는지 아무도 확인한 적이 없다. Step 4에서 `git checkout --`로 그 파일을 버리기 전에, 새 compose가 선언하는 `pgdata` 볼륨과 지금 컨테이너가 실제로 쓰는 마운트가 같은 것인지 확인해야 한다. 다르면(바인드 마운트였거나 볼륨 이름이 다르면) 새 스택은 빈 볼륨으로 떠서 Flyway가 깨끗하게 마이그레이션하고 헬스체크도 통과하지만, 기존 사용자·러닝 세션이 앱 입장에서는 전부 사라진 것과 같다.
+
+```bash
+docker inspect aftergrow-postgres --format '{{json .Mounts}}'
+docker volume ls | grep pgdata
+docker exec aftergrow-postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > ~/pre-cutover.sql
+ls -la ~/pre-cutover.sql
+```
+
+`docker inspect`가 보여주는 마운트 소스와 `docker volume ls`에 있는 `pgdata` 볼륨(이름에 프로젝트 접두사가 붙을 수 있다)을 비교한다. 일치하지 않으면 Step 6 이후로 진행하지 않는다 — 새 compose의 `pgdata` 볼륨 이름을 실제 볼륨에 맞추거나, 기존 볼륨을 `pgdata`로 옮기고 나서 재개한다.
+
+일치 여부와 무관하게 `pre-cutover.sql`은 **이 전환의 유일한 안전망**이다. 파일 크기가 0이 아닌 것을 `ls -la`로 확인한 뒤에만 다음 단계로 진행한다.
+
+이어서 Flyway 이력 테이블이 있는지 확인한다 — `application-prod.yml`은 `ddl-auto: validate`로 Flyway를 켜지만 `baseline-on-migrate`가 없다. 기존 DB가 `ddl-auto: update`로 만들어졌다면(즉 Flyway 없이 Hibernate가 스키마를 만들었다면) `flyway_schema_history` 테이블이 없고, 새 app 컨테이너는 `Found non-empty schema "public" without schema history table` 에러로 기동에 실패한다 — 이미 `up -d`가 이전 컨테이너를 내린 뒤이므로 그 자리에서 서비스가 끊긴다.
+
+```bash
+docker exec aftergrow-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c '\dt flyway_schema_history'
+```
+
+테이블이 없으면(`Did not find any relation`), **전환을 진행하기 전에** `application-prod.yml`에 `baseline-on-migrate: true`와 `baseline-version: 0`을 추가해야 한다. 이건 EC2에서 손으로 고칠 값이 아니라 코드 변경이다 — 별도 커밋으로 만들어 이미지를 다시 빌드·배포한 뒤에 이 태스크를 재개한다.
+
+- [ ] **Step 6: 기존 스택을 내린다**
 
 **`-v`를 붙이지 않는다.** 붙이면 DB 볼륨이 삭제되어 데이터를 잃는다.
 
@@ -813,7 +836,7 @@ Expected: `1`. `0`이면 `.env`에 `JWT_SECRET=<32자 이상의 임의 문자열
 docker compose down
 ```
 
-- [ ] **Step 6: 새 스택을 띄운다**
+- [ ] **Step 7: 새 스택을 띄운다**
 
 ```bash
 docker compose -f docker-compose.prod.yml pull
@@ -823,7 +846,7 @@ docker compose -f docker-compose.prod.yml ps
 
 Expected: `aftergrow-app`, `aftergrow-postgres`, `aftergrow-redis` 세 개가 `Up`. app은 postgres/redis가 healthy가 될 때까지 기다렸다 뜬다.
 
-- [ ] **Step 7: 헬스체크를 확인한다**
+- [ ] **Step 8: 헬스체크를 확인한다**
 
 ```bash
 curl localhost:8080/actuator/health
@@ -833,7 +856,7 @@ Expected: `{"status":"UP"}`
 
 `{"status":"DOWN"}`이면 `docker compose -f docker-compose.prod.yml logs app`으로 원인을 본다. 대개 `.env`의 DB 접속 정보 불일치다.
 
-- [ ] **Step 8: DB 포트가 외부에 열려 있지 않은지 확인한다**
+- [ ] **Step 9: DB 포트가 외부에 열려 있지 않은지 확인한다**
 
 prod compose는 5432를 공개하지 않지만, 기존 컨테이너나 보안 그룹 설정이 남아 있을 수 있다.
 
@@ -845,7 +868,7 @@ Expected: `aftergrow-app`만 `0.0.0.0:8080->8080/tcp`를 갖고, postgres/redis�
 
 이어서 **AWS 콘솔의 보안 그룹에서 5432·6379 인바운드 규칙이 있으면 삭제한다.**
 
-- [ ] **Step 9: 실제 API가 동작하는지 확인한다**
+- [ ] **Step 10: 실제 API가 동작하는지 확인한다**
 
 헬스체크만으로는 앱이 일하는지 알 수 없다. 로그인 후 인증이 필요한 엔드포인트를 호출한다.
 
@@ -865,7 +888,7 @@ curl -s localhost:8080/home -H "Authorization: Bearer <accessToken>"
 
 Expected: `"success": true`.
 
-- [ ] **Step 10: 자동 배포가 끝까지 도는지 확인한다**
+- [ ] **Step 11: 자동 배포가 끝까지 도는지 확인한다**
 
 여기까지는 손으로 한 것이라 자동 경로가 동작한다는 증거가 아직 없다. Step 1에서 실패했던 워크플로를 다시 돌려 확인한다. 로컬에서:
 
@@ -884,9 +907,9 @@ Expected: `EC2에 배포` 단계까지 초록. 이 단계가 성공했다는 것
 | `Permission denied (publickey)` | `EC2_SSH_KEY` 시크릿이 개인키 전문이 아니거나 공개키가 `authorized_keys`에 없다 |
 | `denied: ... unauthorized` | EC2의 `docker login ghcr.io`가 안 됐거나 PAT가 만료됐다 (Step 3) |
 | `cd: no such file or directory` | 워크플로의 `EC2_APP_DIR`이 실제 경로와 다르다 (Task 5 Step 1) |
-| `timeout ... until curl` 에서 멈춤 | 앱이 90초 안에 뜨지 못했다. EC2에서 `docker compose -f docker-compose.prod.yml logs app` |
+| `timeout ... until curl` 에서 멈춤 | 앱이 180초 안에 뜨지 못했다. EC2에서 `docker compose -f docker-compose.prod.yml logs app` |
 
-- [ ] **Step 11: 배포가 실제로 반영되는지 한 번 확인한다**
+- [ ] **Step 12: 배포가 실제로 반영되는지 한 번 확인한다**
 
 워크플로가 초록이어도 "새 이미지가 실제로 반영되는가"는 아직 확인되지 않았다. 사소한 변경 하나로 확인한다.
 
@@ -913,7 +936,7 @@ Expected: EC2의 최신 커밋이 방금 머지한 커밋이고, 컨테이너가
 - [ ] EC2에서 `curl localhost:8080/actuator/health` → `{"status":"UP"}`
 - [ ] EC2 외부에서 5432 접속이 거부됨
 - [ ] 로그인 → `/home` 호출이 배포된 서버에서 정상 동작
-- [ ] `main`에 머지하면 사람 개입 없이 EC2에 반영됨 (Task 7 Step 11)
+- [ ] `main`에 머지하면 사람 개입 없이 EC2에 반영됨 (Task 7 Step 12)
 
 ## 이번 범위 밖
 
