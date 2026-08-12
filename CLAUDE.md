@@ -21,7 +21,7 @@ docker compose up -d          # PostgreSQL + Redis (실행 필수, 아래 참고
 
 **`test`/`build`는 Docker 컨테이너가 떠 있어야 통과합니다.** `contextLoads()`가 `@SpringBootTest`로 실제 PostgreSQL에 붙기 때문에 컨테이너 없이 돌리면 HibernateException으로 실패합니다. 빌드 실패 시 가장 먼저 `docker compose ps`로 postgres/redis가 healthy인지 확인하세요.
 
-테스트는 9개 클래스 51개 메서드이고 **전부 `auth`/`common`만 덮습니다** — running·home·heartrate 도메인에는 테스트가 하나도 없습니다. 그쪽을 고칠 때 초록불은 아무것도 보장하지 않으니 직접 확인하세요. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
+테스트는 22개 클래스 154개 `@Test` 메서드이고, `running`(`RunningSessionApiTest`)·`home`(`HomeDashboardTest`)·`heartrate`(`HeartRateControllerTest`)·`profile`(`ProfileApiTest`)을 포함해 모든 도메인에 통합 테스트가 있습니다. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
 
 CI 환경을 로컬에서 재현하려면 (프로파일별로 설정이 달라 한쪽만 통과하는 일이 생깁니다):
 
@@ -46,7 +46,7 @@ CI(`.github/workflows/test.yml`)는 `SPRING_PROFILES_ACTIVE=test`로 돌고, **d
 
 ## 배포
 
-**`main`에 머지하면 배포까지 자동으로 끝납니다.** `.github/workflows/deploy.yml`이 이미지를 빌드해 `ghcr.io/mju-jungkathon/aftergrow`에 `:latest`·`:{sha}`로 올린 뒤, SSH로 EC2에 들어가 `git pull` → `compose pull` → `up -d` → 헬스체크까지 수행합니다. 헬스체크가 90초 안에 200을 주지 못하면 워크플로가 실패합니다.
+**`main`에 머지하면 배포까지 자동으로 끝납니다.** `.github/workflows/deploy.yml`이 이미지를 빌드해 `ghcr.io/mju-jungkathon/aftergrow`에 `:latest`·`:{sha}`로 올린 뒤, SSH로 EC2에 들어가 `git pull` → `compose pull` → `up -d` → 헬스체크까지 수행합니다. 헬스체크가 180초 안에 200을 주지 못하면 워크플로가 실패합니다.
 
 **EC2(t2.micro, 1GB)에서 `docker build`나 `./gradlew build`를 돌리지 마세요.** postgres·redis·app이 같은 호스트에 있어서, Gradle이 메모리를 다 쓰면 돌아가던 컨테이너가 OOM killer에 종료됩니다. EC2가 하는 일은 pull 뿐입니다.
 
@@ -68,7 +68,17 @@ curl localhost:8080/actuator/health     # {"status":"UP"}
 - prod compose는 postgres·redis 포트를 공개하지 않습니다. app의 8080만 열립니다.
 - GHCR 패키지는 private이라 EC2에서 최초 1회 `docker login ghcr.io`(PAT, `read:packages`)가 필요합니다.
 - **DB 볼륨을 지우지 않도록 `docker compose down -v`를 쓰지 마세요.**
-- `/actuator/health`는 `SecurityConfig`의 `PUBLIC_PATHS`에 있어 토큰 없이 열립니다. actuator 기본 노출은 `health` 하나뿐이고 `show-details`는 `never`라 응답은 `{"status":"UP"}`뿐입니다. **Redis가 죽으면 503이 되는데 이는 의도된 동작입니다** — refresh token이 Redis에만 있어 로그인·재발급이 실제로 불가능한 상태이기 때문입니다.
+- `/actuator/health`는 `SecurityConfig`의 `PUBLIC_PATHS`에 있어 토큰 없이 열립니다. actuator 기본 노출은 `health` 하나뿐이고 `show-details`는 `never`라 응답은 `{"status":"UP"}`뿐입니다. **Redis가 죽으면 503이 되는데 이는 의도된 동작입니다** — refresh token과 rPPG 세션이 Redis에만 있어 로그인·재발급·rPPG 재측정이 실제로 불가능한 상태이기 때문입니다.
+
+**롤백:** `docker-compose.prod.yml`은 `:latest`만 참조하고, EC2도 `:latest`만 pull하므로 이전 이미지는 다른 태그로 남지 않습니다. 게다가 배포 성공 직후 `docker image prune -f`가 태그 없는 이전 이미지를 지웁니다 — 헬스체크는 통과했지만 런타임에 버그가 있는 배포를 되돌릴 방법이 로컬에 없다는 뜻입니다. 되돌릴 수 있는 것은 `:{sha}` 태그뿐입니다(Deploy 워크플로가 `latest`와 함께 올립니다). sha는 Actions 실행 로그나 `git log --oneline`에서 확인합니다.
+
+```bash
+docker pull ghcr.io/mju-jungkathon/aftergrow:<이전 커밋 sha>
+docker tag  ghcr.io/mju-jungkathon/aftergrow:<이전 커밋 sha> ghcr.io/mju-jungkathon/aftergrow:latest
+docker compose -f docker-compose.prod.yml up -d
+```
+
+- EC2의 `.env`가 `POSTGRES_*`와 `JWT_SECRET`을 공급합니다. `.env`가 없거나 값이 잘리면 다음 배포에서 postgres가 그대로 죽습니다 — compose는 `.env`를 읽지 못해도 조용히 빈 문자열을 넘기고, `pg_isready` healthcheck가 실패하며 app이 postgres를 기다리다 멈춥니다.
 
 ## 아키텍처
 
@@ -92,7 +102,7 @@ Spring Security는 **7.0.6**, Spring Framework는 7.0.8입니다. 람다 DSL만 
 ### 저장소 역할 분담
 
 - **PostgreSQL** — 서버가 재시작돼도 남아야 하는 것: 사용자, 러닝 세션 결과, 심박수 기록.
-- **Redis** — 사라져도 다시 만들 수 있는 것: refresh token, rate limit 카운터. (러닝 진행 중 상태도 원래 Redis 담당이었지만 **현재는 Postgres 행을 직접 갱신**합니다 — 실제로 Redis에 있는 건 refresh token뿐입니다.)
+- **Redis** — 사라져도 다시 만들 수 있는 것: refresh token, rate limit 카운터. (러닝 진행 중 상태도 원래 Redis 담당이었지만 **현재는 Postgres 행을 직접 갱신**합니다 — 실제로 Redis를 쓰는 건 refresh token(`RefreshTokenStore`)과 rPPG 측정 세션(`heartrate/repository/RppgSessionStore`) 둘입니다. Redis가 죽으면 로그인·재발급뿐 아니라 rPPG 재측정 플로우도 함께 막힙니다 — `/actuator/health`가 503을 돌려주는 것도 이 때문입니다.)
 
 JWT는 access(단명) + refresh(Redis 저장) 2종. refresh를 Redis에 두는 이유는 로그아웃 시 즉시 무효화하기 위함입니다.
 
@@ -128,8 +138,8 @@ jungkathon3team.aftergrow
 ├── auth/       # 회원가입·로그인·재발급·로그아웃 ✔ 완료
 ├── home/       # GET /home 대시보드 ✔ (여러 도메인 집계)
 ├── running/    # prepare / 시작 / live / end + 스트레칭 ✔, external/에 UV·위치 목 구현
-├── heartrate/  # 엔티티·리포지토리만 (홈 집계용). API 없음
-├── profile/    # UserGoal 엔티티·리포지토리만 (홈 집계용). API 없음
+├── heartrate/  # 심박수 측정·애플헬스 연동 API ✔ (홈 집계에도 쓰임)
+├── profile/    # 프로필 API ✔ (홈 집계에도 쓰임)
 ├── recovery/   # 미착수 (패키지 자체가 없음)
 └── common/     # ApiResponse<T>, ErrorCode, 예외 처리, SecurityConfig, OpenApiConfig
 ```
@@ -167,7 +177,7 @@ jungkathon3team.aftergrow
 
 아직 없는 것:
 
-- **회복 가이드(recovery)** 도메인, 심박수/프로필 API. 다음은 심박수 → 회복 가이드 → 프로필 순.
+- **회복 가이드(recovery)** 도메인만 미착수(패키지 자체가 없음). 심박수·프로필 API는 구현 완료.
 - `RedisConfig` — `StringRedisTemplate` 자동 구성으로 충분해 아직 불필요합니다.
 - **러닝 진행 상태의 Redis 저장** — 원래 설계는 `/live`를 Redis로 받는 것이었지만, 현재 구현은 Postgres의 `running_sessions` 행을 직접 갱신합니다(아래 참고).
 
@@ -218,4 +228,4 @@ public ApiResponse<HomeResponse> home(@AuthenticationPrincipal UUID userId) { ..
 - `docs/프로젝트_컨텍스트_jungkathon3team.md` — 기술 선택 이유, 트러블슈팅 기록, 진행 체크리스트. "왜 이렇게 됐지?" 싶을 때 여기부터.
 - `docs/개발_시작_가이드.md` — 다음에 구현할 것(`common/`, 인증 순서, 테스트 전략)만 남긴 문서.
 - `docs/ERD_aftergrow.md` — DB 구조와 설계 의도.
-- `docs/백엔드_기술스택_노션용.md` — 스택 개요 및 AWS 배포 구상(미착수).
+- `docs/백엔드_기술스택_노션용.md` — 스택 개요 및 AWS 배포 구상. 배포 자체는 이 브랜치(`feature/deploy-pipeline`)에서 구현 완료 — 절차는 위 `## 배포` 절 참고.
