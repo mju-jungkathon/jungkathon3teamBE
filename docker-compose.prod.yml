@@ -24,6 +24,9 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       SPRING_DATA_REDIS_HOST: redis
       JWT_SECRET: ${JWT_SECRET}
+      # 비어 있으면 회복 가이드가 규칙 기반(MockRecoveryGuideAiClient)으로 폴백합니다.
+      # 필수가 아니므로 .env에 없어도 compose 경고 없이 빈 값으로 넘깁니다.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
