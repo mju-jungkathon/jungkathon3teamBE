@@ -6,6 +6,9 @@ import jakarta.validation.Valid;
 import jungkathon3team.aftergrow.common.response.ApiResponse;
 import jungkathon3team.aftergrow.heartrate.dto.SelectSourceDto;
 import jungkathon3team.aftergrow.heartrate.service.HeartRateMeasurementService;
+import jungkathon3team.aftergrow.recovery.dto.RecoveryGuideResponse;
+import jungkathon3team.aftergrow.recovery.dto.RunningCompleteResponse;
+import jungkathon3team.aftergrow.recovery.service.RecoveryGuideService;
 import jungkathon3team.aftergrow.running.dto.RunningEndDto;
 import jungkathon3team.aftergrow.running.dto.RunningLiveResponse;
 import jungkathon3team.aftergrow.running.dto.RunningPrepareResponse;
@@ -28,6 +31,7 @@ public class RunningSessionController {
 
     private final RunningSessionService runningSessionService;
     private final HeartRateMeasurementService heartRateMeasurementService;
+    private final RecoveryGuideService recoveryGuideService;
 
     @Operation(summary = "러닝 준비",
             description = "화면 3 진입 시 UV/위치/스트레칭을 안내합니다.")
@@ -83,5 +87,27 @@ public class RunningSessionController {
     ) {
         return ApiResponse.ok(
                 heartRateMeasurementService.selectSource(userId, sessionId, request));
+    }
+
+    @Operation(summary = "AI 회복 가이드 생성",
+            description = "화면 7 진입 시 세션의 강도·거리·UV 지수·심박수 측정 결과를 종합해 회복 가이드를 생성합니다. "
+                    + "이미 생성된 세션이면 재생성하지 않고 기존 가이드를 그대로 반환합니다.")
+    @PostMapping("/{id}/recovery-guide")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<RecoveryGuideResponse> generateRecoveryGuide(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable("id") UUID sessionId
+    ) {
+        return ApiResponse.ok(recoveryGuideService.generate(userId, sessionId));
+    }
+
+    @Operation(summary = "세션 완료 & 리포트 확정",
+            description = "화면 7 '완료하고 리포트 보기'. 회복 가이드가 먼저 생성되어 있어야 합니다.")
+    @PostMapping("/{id}/complete")
+    public ApiResponse<RunningCompleteResponse> complete(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable("id") UUID sessionId
+    ) {
+        return ApiResponse.ok(recoveryGuideService.complete(userId, sessionId));
     }
 }

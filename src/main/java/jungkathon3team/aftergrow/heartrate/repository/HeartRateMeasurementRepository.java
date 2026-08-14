@@ -25,6 +25,13 @@ public interface HeartRateMeasurementRepository extends JpaRepository<HeartRateM
             UUID userId, SyncStatus syncStatus);
 
     /**
+     * R5.1 회복 가이드: 해당 러닝 세션의 가장 최근 "성공" 측정 1건.
+     * <p>세션 하나에 여러 측정(워치 실패 후 rPPG 재측정 등)이 있을 수 있어 최신순 1건만 쓴다.
+     */
+    Optional<HeartRateMeasurement> findTopByRunningSession_RunningSessionIdAndSyncStatusOrderByMeasuredAtDesc(
+            UUID runningSessionId, SyncStatus syncStatus);
+
+    /**
      * R6.1 측정 기록 목록: 사용자의 range 내 측정 기록을 최신순으로.
      * <p>sourceRatio는 이 목록을 자바에서 세서 만든다(30일치면 많아야 수십 건).
      */
