@@ -3,3 +3,8 @@ spring:
     name: aftergrow
   profiles:
     active: local
+
+openai:
+  api-key: ${OPENAI_API_KEY:}
+  model: ${OPENAI_MODEL:gpt-4o-mini}
+  timeout-ms: ${OPENAI_TIMEOUT_MS:8000}
