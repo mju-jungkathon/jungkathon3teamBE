@@ -21,7 +21,7 @@ docker compose up -d          # PostgreSQL + Redis (실행 필수, 아래 참고
 
 **`test`/`build`는 Docker 컨테이너가 떠 있어야 통과합니다.** `contextLoads()`가 `@SpringBootTest`로 실제 PostgreSQL에 붙기 때문에 컨테이너 없이 돌리면 HibernateException으로 실패합니다. 빌드 실패 시 가장 먼저 `docker compose ps`로 postgres/redis가 healthy인지 확인하세요.
 
-테스트는 24개 클래스 182개 `@Test` 메서드이고, `running`(`RunningSessionApiTest`)·`home`(`HomeDashboardTest`)·`heartrate`(`HeartRateControllerTest`)·`profile`(`ProfileApiTest`)을 포함해 모든 도메인에 통합 테스트가 있습니다. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
+테스트는 25개 클래스 190개 `@Test` 메서드이고, `running`(`RunningSessionApiTest`)·`home`(`HomeDashboardTest`)·`heartrate`(`HeartRateControllerTest`)·`profile`(`ProfileApiTest`)을 포함해 모든 도메인에 통합 테스트가 있습니다. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
 
 CI 환경을 로컬에서 재현하려면 (프로파일별로 설정이 달라 한쪽만 통과하는 일이 생깁니다):
 

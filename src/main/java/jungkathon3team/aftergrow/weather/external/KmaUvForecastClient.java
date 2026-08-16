@@ -157,20 +157,38 @@ public class KmaUvForecastClient implements UvForecastClient {
         return hourly;
     }
 
-    /** 값이 있으면 그대로, 없으면 양옆 3시간 격자값으로 보간한다. 양옆이 다 없으면 0(주로 새벽). */
+    /**
+     * 값이 있으면 그대로, 없으면 <b>양옆의 가장 가까운 격자값 사이를 거리로 가중해</b> 보간한다.
+     * <p>바로 옆 시각만 보면 안 된다 — 3시간 격자라 이웃이 1시간 옆에 없는 경우가 대부분이고,
+     * 그러면 08시(06시=2와 09시=6 사이)가 6이 되어 곡선이 계단처럼 튄다.
+     * <p><b>알려진 구간 밖으로는 외삽하지 않고 0을 쓴다.</b> 발표가 덮지 않는 건 새벽·심야뿐이고
+     * 그 시간대 UV는 실제로 0이다 — 첫 값(06시)을 00시까지 끌어오면 한밤중에 UV가 있다고 답하게 된다.
+     */
     private int uvAt(Integer[] byHour, int hour) {
         if (byHour[hour] != null) {
             return byHour[hour];
         }
-        Integer before = hour > 0 ? byHour[hour - 1] : null;
-        Integer after = hour < 23 ? byHour[hour + 1] : null;
-        if (before != null && after != null) {
-            return Math.round((before + after) / 2.0f);
+
+        int beforeHour = -1;
+        for (int h = hour - 1; h >= 0; h--) {
+            if (byHour[h] != null) {
+                beforeHour = h;
+                break;
+            }
         }
-        if (before != null) {
-            return before;
+        int afterHour = -1;
+        for (int h = hour + 1; h < 24; h++) {
+            if (byHour[h] != null) {
+                afterHour = h;
+                break;
+            }
         }
-        return after != null ? after : 0;
+
+        if (beforeHour < 0 || afterHour < 0) {
+            return 0;
+        }
+        double weight = (double) (hour - beforeHour) / (afterHour - beforeHour);
+        return (int) Math.round(byHour[beforeHour] + weight * (byHour[afterHour] - byHour[beforeHour]));
     }
 
     private String abbreviate(String body) {
