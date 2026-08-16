@@ -181,7 +181,15 @@ jungkathon3team.aftergrow
 아직 없는 것:
 
 - **회원 탈퇴(`DELETE /users/me`)는 DB `ON DELETE CASCADE`에 기댑니다.** 자바 쪽에서 자식 행을 지우는 코드가 없으니 찾지 마세요. 새 테이블을 만들 때 `users`를 참조한다면 반드시 `ON DELETE CASCADE`를 붙여야 탈퇴가 FK 위반으로 실패하지 않습니다. `WithdrawControllerTest`는 **`@Transactional`을 쓰지 않습니다** — 롤백되면 CASCADE가 실제로 동작했는지 확인할 수 없기 때문이고, 대신 테스트가 직접 정리합니다.
-- **주간 "거리" 목표를 저장할 곳이 없습니다.** `weeklyRunGoal`은 횟수 전용으로 확정됐습니다. `USER_GOALS`에 `weeklyDistanceGoalKm`를 신설할지 UI를 없앨지 팀 결정 대기 중입니다.
+- **주간 "거리" 목표를 저장할 곳이 없습니다 — 팀 결정 대기 중입니다(2026-08-16 기준 미결).**
+  `weeklyRunGoal`이 **주간 횟수 전용**으로 확정되면서(`docs/AfterGrow_백엔드_수정사항_정리.md` 항목 5) 홈 화면의 "누적 거리 14.2 / 25.0km" 같은 **거리 기반 목표**는 저장할 컬럼이 사라졌습니다. 현재는 B안 상태(미구현)로 두었습니다.
+
+  | 안 | 내용 | 백엔드 작업량 |
+  |---|---|---|
+  | **A** | `USER_GOALS`에 `weekly_distance_goal_km` 신설 | 마이그레이션 1개(`V13`) + `UserGoal` 필드 + `GoalUpdateDto` 요청/응답 + `ProfileResponse.Goal` + `HomeResponse.WeeklySummary`에 목표치 노출. 반나절 규모 |
+  | **B** | 횟수 목표만 쓰고 홈 화면의 거리 목표 UI를 프론트에서 제거 | 0 |
+
+  A안으로 정해지면 `HomeService`의 주간 집계(`sumDistanceKmBetween`)가 이미 실제 누적 거리를 계산하고 있으므로 **목표치만 얹으면 됩니다**. 새 집계 쿼리를 만들지 마세요.
 - `RedisConfig` — `StringRedisTemplate` 자동 구성으로 충분해 아직 불필요합니다.
 - **러닝 진행 상태의 Redis 저장** — 원래 설계는 `/live`를 Redis로 받는 것이었지만, 현재 구현은 Postgres의 `running_sessions` 행을 직접 갱신합니다(아래 참고).
 
