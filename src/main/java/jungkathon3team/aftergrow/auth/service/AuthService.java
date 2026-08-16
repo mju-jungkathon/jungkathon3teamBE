@@ -5,6 +5,7 @@ import jungkathon3team.aftergrow.auth.dto.LoginResponse;
 import jungkathon3team.aftergrow.auth.dto.SignupRequest;
 import jungkathon3team.aftergrow.auth.dto.SignupResponse;
 import jungkathon3team.aftergrow.auth.dto.TokenRefreshRequest;
+import jungkathon3team.aftergrow.auth.dto.WithdrawRequest;
 import jungkathon3team.aftergrow.auth.dto.TokenRefreshResponse;
 import jungkathon3team.aftergrow.auth.entity.User;
 import jungkathon3team.aftergrow.auth.jwt.JwtTokenProvider;
@@ -37,13 +38,23 @@ public class AuthService {
             throw new BusinessException(ErrorCode.DUPLICATE_EMAIL);
         }
 
-        User user = User.signup(
+        User user = userRepository.save(User.signup(
                 request.email(),
                 passwordEncoder.encode(request.password()),
                 request.nickname(),
-                request.marketingAgreed());
+                request.marketingAgreed()));
 
-        return SignupResponse.from(userRepository.save(user));
+        // 가입 직후 온보딩(목표 저장)이 바로 이어지므로 로그인과 같은 방식으로 토큰을 발급한다.
+        // refresh를 Redis에 남기는 것까지 로그인과 동일해야 로그아웃이 똑같이 동작한다.
+        UUID userId = user.getUserId();
+        String refreshToken = jwtTokenProvider.createRefreshToken(userId);
+        refreshTokenStore.save(userId, refreshToken, jwtTokenProvider.getRefreshTokenTtl());
+
+        return SignupResponse.of(
+                user,
+                jwtTokenProvider.createAccessToken(userId),
+                refreshToken,
+                jwtTokenProvider.getAccessTokenTtl().toSeconds());
     }
 
     @Transactional(readOnly = true)
@@ -94,5 +105,29 @@ public class AuthService {
      */
     public void logout(UUID userId) {
         refreshTokenStore.delete(userId);
+    }
+
+    /**
+     * 회원 탈퇴. 사용자 행을 지우면 DB의 {@code ON DELETE CASCADE}가 목표·알림·연동상태·러닝 세션과
+     * 그에 딸린 심박수 측정·회복 가이드·회복 액션까지 함께 지운다. 애플리케이션에서 순서를 챙길 필요가 없다.
+     *
+     * <p>비밀번호를 다시 확인하는 이유는 {@link WithdrawRequest} 참고. 불일치는 로그인과 같은 E4011이며,
+     * 이미 인증된 사용자라 계정 존재 여부가 노출되는 문제는 없다.
+     *
+     * <p><b>이미 발급된 access 토큰은 만료 전까지 서명 검증을 통과합니다</b>(JWT는 취소할 수 없다).
+     * 다만 사용자 행이 사라져 대부분의 API가 E4040으로 떨어진다. refresh는 여기서 지우므로 재발급은 막힌다.
+     */
+    @Transactional
+    public void withdraw(UUID userId, WithdrawRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND)); // E4040
+
+        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            throw new BusinessException(ErrorCode.INVALID_CREDENTIALS); // E4011
+        }
+
+        // 계정이 사라진 뒤에도 refresh 키가 남아 있으면 재발급이 시도된다. 삭제 전에 정리한다.
+        refreshTokenStore.delete(userId);
+        userRepository.delete(user);
     }
 }

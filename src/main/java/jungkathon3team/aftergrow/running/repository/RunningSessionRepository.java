@@ -8,11 +8,19 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 
 public interface RunningSessionRepository extends JpaRepository<RunningSession, UUID> {
 
     boolean existsByUser_UserIdAndStatus(UUID userId, RunningStatus status);
+
+    /**
+     * 러닝 기록 목록: 사용자의 range 내 세션을 최신순으로.
+     * <p>진행 중(IN_PROGRESS) 세션도 함께 나온다 — 기록 화면에서 "달리는 중"으로 보여줄 수 있게.
+     */
+    List<RunningSession> findByUser_UserIdAndStartedAtGreaterThanEqualOrderByStartedAtDesc(
+            UUID userId, LocalDateTime since);
 
     /** R2 홈: 특정 상태의 세션이 기간 내에 시작됐는지 (오늘 IN_PROGRESS 판별용). */
     boolean existsByUser_UserIdAndStatusAndStartedAtBetween(

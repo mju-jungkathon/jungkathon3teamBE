@@ -12,6 +12,8 @@ import jungkathon3team.aftergrow.recovery.service.RecoveryGuideService;
 import jungkathon3team.aftergrow.running.dto.RunningEndDto;
 import jungkathon3team.aftergrow.running.dto.RunningLiveResponse;
 import jungkathon3team.aftergrow.running.dto.RunningPrepareResponse;
+import jungkathon3team.aftergrow.running.dto.RunningSessionDetailResponse;
+import jungkathon3team.aftergrow.running.dto.RunningRecordsResponse;
 import jungkathon3team.aftergrow.running.dto.RunningStartDto;
 import jungkathon3team.aftergrow.running.entity.Intensity;
 import jungkathon3team.aftergrow.running.service.RunningSessionService;
@@ -41,6 +43,32 @@ public class RunningSessionController {
             @RequestParam double lng
     ) {
         return ApiResponse.ok(runningSessionService.prepare(lat, lng));
+    }
+
+    @Operation(summary = "러닝 기록 목록",
+            description = "range는 \"{일수}d\" 형식입니다(기본 30d). 응답 용량 때문에 목록에는 "
+                    + "GPS 경로가 없습니다 — 경로는 상세 조회에서만 내려갑니다.")
+    @GetMapping
+    public ApiResponse<RunningRecordsResponse> getRecords(
+            @AuthenticationPrincipal UUID userId,
+            @RequestParam(required = false) String range
+    ) {
+        return ApiResponse.ok(runningSessionService.getRecords(userId, range));
+    }
+
+    /**
+     * {@code /prepare}가 먼저 선언돼 있지만 순서에 기대지 않는다 — 스프링은 구체적인 리터럴 경로를
+     * {@code {id}} 템플릿보다 우선하고, {@code id}가 UUID라 "prepare"는 애초에 바인딩되지 않는다.
+     * 그래도 회귀를 막으려고 테스트로 고정해 두었다.
+     */
+    @Operation(summary = "러닝 기록 상세",
+            description = "지도에 그릴 GPS 경로(routePath)가 포함됩니다. 경로 없이 종료한 세션은 null입니다.")
+    @GetMapping("/{id}")
+    public ApiResponse<RunningSessionDetailResponse> getDetail(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable UUID id
+    ) {
+        return ApiResponse.ok(runningSessionService.getDetail(userId, id));
     }
 
     @Operation(summary = "러닝 시작")
