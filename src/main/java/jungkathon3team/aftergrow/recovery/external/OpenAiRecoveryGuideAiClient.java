@@ -35,9 +35,14 @@ public class OpenAiRecoveryGuideAiClient implements RecoveryGuideAiClient {
 
     private static final String SYSTEM_PROMPT = """
             너는 러닝 앱의 회복 코치야. 사용자가 방금 마친 러닝 데이터를 보고
-            1~2문장의 한국어 요약 메시지와, 회복에 도움이 되는 액션 2~3개를 제안해.
-            actions의 type은 HYDRATION, COOLDOWN_STRETCH, UV_CAUTION 중에서만 골라.
+            1~2문장의 한국어 요약 메시지와, 회복에 도움이 되는 액션 3~4개를 제안해.
+            actions의 type은 HYDRATION, COOLDOWN_STRETCH, UV_CAUTION, SKINCARE 중에서만 골라.
             UV_CAUTION은 UV 지수가 높을 때만 포함하고, 그렇지 않으면 빼.
+            SKINCARE는 항상 하나 포함해. 운동 시간이 길수록 땀·피지가 많고, UV 지수가 높을수록
+            자외선 자극이 크고, 심박수·강도가 높을수록 홍조와 열감이 심하다는 점을 반영해서
+            세안 / 진정 / 보습 / 자외선 차단 중 지금 이 데이터에 가장 필요한 것을
+            구체적인 순서와 시점(예: "귀가 후 10분 이내")까지 담아 description에 적어.
+            의약품 추천이나 진단은 하지 말고, 특정 브랜드명도 쓰지 마.
             cooldownTimerSec은 120~600 사이 정수로, 강도가 높거나 거리가 길수록 크게 잡아.
             반드시 지정된 JSON 스키마 형식으로만 응답하고 다른 설명은 붙이지 마.
             """;
@@ -114,11 +119,13 @@ public class OpenAiRecoveryGuideAiClient implements RecoveryGuideAiClient {
         return """
                 강도: %s
                 거리: %s km
+                운동 시간: %s 분
                 시작 시점 UV 지수: %s
                 측정된 평균 심박수: %s bpm
                 """.formatted(
                 ctx.intensity() != null ? ctx.intensity() : "알수없음",
                 ctx.distanceKm() != null ? ctx.distanceKm() : "알수없음",
+                ctx.durationSec() != null ? ctx.durationSec() / 60 : "알수없음",
                 ctx.uvIndexAtStart() != null ? ctx.uvIndexAtStart() : "알수없음",
                 ctx.measuredBpm() != null ? ctx.measuredBpm() : "측정안됨"
         );
@@ -167,7 +174,7 @@ public class OpenAiRecoveryGuideAiClient implements RecoveryGuideAiClient {
                 "type", "object",
                 "properties", mapOf(
                         "type", mapOf("type", "string",
-                                "enum", List.of("HYDRATION", "COOLDOWN_STRETCH", "UV_CAUTION")),
+                                "enum", List.of("HYDRATION", "COOLDOWN_STRETCH", "UV_CAUTION", "SKINCARE")),
                         "title", mapOf("type", "string"),
                         "description", mapOf("type", "string")
                 ),

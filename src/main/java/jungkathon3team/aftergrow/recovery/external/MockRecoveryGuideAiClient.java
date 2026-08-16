@@ -38,12 +38,27 @@ public class MockRecoveryGuideAiClient implements RecoveryGuideAiClient {
             actions.add(new ActionDraft(RecoveryActionType.UV_CAUTION,
                     "자외선 진정 케어", "직사광선을 피해 그늘에서 휴식하고 노출 부위를 시원하게 식혀주세요"));
         }
+        actions.add(skincare(highLoad, highUv));
 
         return new Guide(
                 buildSummary(ctx, highLoad, highUv),
                 actions,
                 highLoad ? EXTENDED_COOLDOWN_SEC : DEFAULT_COOLDOWN_SEC
         );
+    }
+
+    /** LLM이 없을 때의 스킨케어 문구. 땀(강도) × 자외선(UV) 2x2 조합만 구분한다. */
+    private ActionDraft skincare(boolean highLoad, boolean highUv) {
+        if (highUv) {
+            return new ActionDraft(RecoveryActionType.SKINCARE, "자외선 후 진정 케어",
+                    highLoad
+                            ? "미지근한 물로 땀을 씻어내고, 차가운 진정 시트마스크나 수분 크림으로 열감을 가라앉혀 주세요"
+                            : "노출 부위를 미온수로 씻고 수분 크림으로 마무리한 뒤, 다음 외출 전 자외선 차단제를 다시 발라주세요");
+        }
+        return new ActionDraft(RecoveryActionType.SKINCARE, "러닝 후 세안 케어",
+                highLoad
+                        ? "땀과 피지가 모공에 남지 않도록 30분 이내에 약산성 클렌저로 세안하고 보습까지 마무리해 주세요"
+                        : "미온수로 가볍게 세안하고 수분 크림으로 마무리해 주세요");
     }
 
     private String buildSummary(Context ctx, boolean highLoad, boolean highUv) {

@@ -9,5 +9,7 @@ package jungkathon3team.aftergrow.recovery.entity;
 public enum RecoveryActionType {
     HYDRATION,
     COOLDOWN_STRETCH,
-    UV_CAUTION
+    UV_CAUTION,
+    /** 러닝 직후 스킨케어(세안·진정·보습·자외선 차단). LLM이 운동 데이터를 보고 구체 문구를 만든다. */
+    SKINCARE
 }

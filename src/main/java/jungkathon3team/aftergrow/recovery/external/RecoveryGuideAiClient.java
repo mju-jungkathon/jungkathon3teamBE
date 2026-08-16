@@ -16,8 +16,13 @@ public interface RecoveryGuideAiClient {
 
     Guide generate(Context context);
 
-    /** 가이드 생성에 필요한 입력값. 세션 종료 시점의 운동 데이터 + 측정된 심박수. */
-    record Context(Intensity intensity, Double distanceKm, Integer uvIndexAtStart, Integer measuredBpm) {}
+    /**
+     * 가이드 생성에 필요한 입력값. 세션 종료 시점의 운동 데이터 + 측정된 심박수.
+     * <p>스트레스 지수는 아직 계산되지 않아(HRV 미구현, {@code stressStatus=PENDING_HRV_CALCULATION})
+     * 여기에 없다. 계산되면 필드를 추가하고 프롬프트에 한 줄 얹으면 된다.
+     */
+    record Context(Intensity intensity, Double distanceKm, Integer durationSec,
+                   Integer uvIndexAtStart, Integer measuredBpm) {}
 
     /** 생성 결과. actions는 저장 전 초안(draft)이라 엔티티가 아니다. */
     record Guide(String summaryMessage, List<ActionDraft> actions, int cooldownTimerSec) {}
