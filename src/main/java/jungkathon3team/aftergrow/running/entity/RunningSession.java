@@ -7,8 +7,11 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -57,6 +60,14 @@ public class RunningSession {
     @Column(name = "lng")
     private Double lng;
 
+    /**
+     * 러닝 중 수집한 GPS 트랙. 종료 시점에 배열 통째로 한 번 저장한다(러닝 중에는 전송하지 않는다).
+     * <p>경로를 안 보낸 클라이언트도 있으므로 null이 될 수 있다.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "route_path")
+    private List<RoutePoint> routePath;
+
     public static RunningSession start(User user, LocalDateTime startedAt, Double lat, Double lng, Integer uvIndexAtStart) {
         return RunningSession.builder()
                 .user(user)
@@ -85,12 +96,17 @@ public class RunningSession {
         }
     }
 
-    public void end(LocalDateTime endedAt, Integer durationSec, Double distanceKm, Intensity intensity) {
+    public void end(LocalDateTime endedAt, Integer durationSec, Double distanceKm, Intensity intensity,
+                    List<RoutePoint> routePath) {
         this.endedAt = endedAt;
         this.durationSec = durationSec;
         this.distanceKm = distanceKm;
         this.intensity = intensity;
         this.status = RunningStatus.ENDED;
+        // 경로를 보내지 않은 클라이언트가 기존에 저장된 경로를 지우지 않도록 null이면 건드리지 않는다.
+        if (routePath != null) {
+            this.routePath = routePath;
+        }
     }
 
     public void complete() {

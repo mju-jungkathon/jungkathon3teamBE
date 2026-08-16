@@ -214,7 +214,7 @@ class RecoveryGuideApiTest {
     private RunningSession endedSession(User owner, double distanceKm, Intensity intensity, int uvIndexAtStart) {
         RunningSession session = RunningSession.start(
                 owner, LocalDateTime.now().minusMinutes(40), 37.5, 127.0, uvIndexAtStart);
-        session.end(LocalDateTime.now(), 1800, distanceKm, intensity);
+        session.end(LocalDateTime.now(), 1800, distanceKm, intensity, null);
         return runningSessionRepository.save(session);
     }
 }

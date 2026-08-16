@@ -114,7 +114,8 @@ public class RunningSessionService {
         RunningSession session = getOwnedSession(userId, sessionId);
 
         if (session.isInProgress()) {
-            session.end(request.endedAt(), request.durationSec(), request.distanceKm(), request.intensity());
+            session.end(request.endedAt(), request.durationSec(), request.distanceKm(), request.intensity(),
+                    request.routePath());
         }
 
         return new RunningEndDto.Response(
