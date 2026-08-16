@@ -199,6 +199,8 @@ jungkathon3team.aftergrow
 - **`integration_status.location_linked`는 아무도 읽지도 쓰지도 않습니다.** true로 만드는 경로가 없어 항상 false였고 `locationPermission`과 구분되지 않아 **API 응답에서 뺐습니다**(컬럼과 엔티티 필드는 남아 있습니다). "위치 연동"이 권한과 다른 개념으로 정의되면 그때 되살리세요.
 - **스트레칭 세션은 러닝 세션과 FK로 연결돼 있지 않습니다.** 화면 흐름상 러닝보다 먼저 만들어지기 때문입니다. `GET /running-sessions/{id}`의 `preRunStretching`은 **러닝 시작 직전 60분 이내**라는 시각 근접도로 고른 추정값입니다(`RunningSessionService.PRE_RUN_STRETCHING_WINDOW`). 정확히 묶어야 하면 `stretching_sessions`에 `running_session_id`를 추가하고 러닝 시작 시 연결해야 합니다.
 - **`GET /running-sessions/{id}`가 `GET /running-sessions/prepare`와 같은 자리를 다툽니다.** `{id}`를 `UUID`로 받아 "prepare"가 바인딩되지 않으므로 현재는 안전하지만, `String`으로 바꾸면 준비 화면이 통째로 깨집니다. `RunningSessionApiTest`가 이걸 고정하고 있습니다.
+- **러닝 종료 좌표를 담는 컬럼은 없고, 만들지 마세요.** 시작점은 `running_sessions.lat/lng`, 종료점은 `route_path`의 마지막 원소입니다. 폴리라인을 그릴 배열이 이미 양 끝을 갖고 있어 별도 컬럼은 중복이고, 두 값이 어긋날 여지만 생깁니다. 지도 중심·줌도 좌표에서 계산되는 값이라 서버가 주지 않습니다(프론트가 `setBounds`).
+- **러닝한 "장소 이름"은 세션에 저장되지 않습니다.** `LocationLabelResolver`는 `prepare()`에서만 쓰이고 버려지며, `MockLocationLabelResolver`가 좌표와 무관하게 `"현재 위치"`만 돌려줍니다. History 카드에 지명을 띄우려면 카카오 로컬 역지오코딩 연동 + `location_label` 컬럼이 필요합니다(미착수).
 - **러닝 기록 목록에는 `routePath`를 싣지 마세요.** 세션당 수백 점이라 목록 응답이 수백 KB가 됩니다. 목록은 `hasRoutePath` 불리언만 주고, 좌표는 상세에서만 내려갑니다.
 - `POST /running-sessions/{id}/end`는 **멱등**입니다. 이미 끝난 세션에 다시 호출하면 에러 대신 현재 상태를 그대로 돌려줍니다(명세에 전용 에러 코드가 없어서 내린 결정). 진행 중 세션이 있는데 새로 시작하면 `E4090`.
 - `running/external/`의 `MockUvIndexClient`·`MockLocationLabelResolver`는 **인터페이스 뒤에 있는 임시 구현**입니다. 실제 API(기상청/Open-Meteo, 카카오 로컬)를 붙일 때 새 `@Component`를 만들고 목의 `@Component`를 제거하세요. UV 지수 → 라벨("낮음"…"위험") 변환은 `UvIndexClient.UvIndexResult.of()` 한 곳에만 두고 재구현하지 마세요 — 홈 주간 요약도 이걸 씁니다.

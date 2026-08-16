@@ -488,13 +488,42 @@
   > 만들어집니다) **러닝 시작 직전 60분 이내**에 시작한 것 중 가장 최근 하나를 고릅니다.
   > 짧은 간격으로 러닝을 두 번 하면 같은 스트레칭이 두 러닝에 붙을 수 있습니다.
 
+**지도에 경로 그리기 (프론트)**
+
+지도 중심과 줌은 **좌표에서 계산되는 값**이라 서버가 내려주지 않습니다. `setBounds`가 경로 전체를
+화면에 맞춰주므로 `center`/`level`을 직접 계산하지 마세요.
+
 ```js
 const { data } = await api.get(`/running-sessions/${id}`);
-new kakao.maps.Polyline({
-  path: data.routePath.map(p => new kakao.maps.LatLng(p.lat, p.lng)),
-  strokeWeight: 5, strokeColor: '#e4572e',
+const { routePath, startLocation } = data.data;
+
+const map = new kakao.maps.Map(el, {
+  center: new kakao.maps.LatLng(startLocation.lat, startLocation.lng), // 경로가 없을 때의 폴백
+  level: 5,
 });
+
+if (routePath?.length) {
+  const path = routePath.map(p => new kakao.maps.LatLng(p.lat, p.lng));
+
+  new kakao.maps.Polyline({ path, strokeWeight: 5, strokeColor: '#e4572e' }).setMap(map);
+  new kakao.maps.Marker({ position: path[0] }).setMap(map);                   // 시작점
+  new kakao.maps.Marker({ position: path[path.length - 1] }).setMap(map);     // 종료점
+
+  // 경로 전체가 들어오도록 중심·줌 자동 조정
+  map.setBounds(path.reduce((b, ll) => (b.extend(ll), b), new kakao.maps.LatLngBounds()));
+}
 ```
+
+- **시작점·종료점은 `routePath`의 양 끝**입니다. 종료 좌표를 담는 별도 컬럼은 없습니다 —
+  폴리라인을 그릴 배열이 이미 양 끝을 갖고 있어 중복이기 때문입니다.
+- **경로가 있으면 시작 마커도 `routePath[0]`을 쓰세요.** `startLocation`은 러닝 *시작 API 호출 시점*의
+  좌표이고 `routePath[0]`은 *첫 GPS 샘플*이라 몇 미터 어긋날 수 있습니다. 선의 시작과 마커가
+  따로 놀지 않으려면 한쪽으로 통일해야 합니다.
+- 따라서 **지도를 쓸 거면 종료 시 `routePath`를 반드시 보내세요.** 안 보내면 시작점만 남아
+  경로도 종료점도 복원할 수 없습니다(§3.5).
+- **러닝한 "장소 이름"은 아직 저장되지 않습니다.** `LocationLabelResolver`는 러닝 준비(§3.1)에서만
+  쓰이고 세션에 남지 않으며, 현재 구현은 좌표와 무관하게 `"현재 위치"`를 돌려주는 목입니다.
+  History 카드에 지명을 띄우려면 카카오 로컬 역지오코딩 연동과 `location_label` 컬럼이 필요합니다.
 
 **에러**
 
