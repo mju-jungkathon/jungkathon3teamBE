@@ -28,4 +28,42 @@ public interface RecoveryGuideAiClient {
     record Guide(String summaryMessage, List<ActionDraft> actions, int cooldownTimerSec) {}
 
     record ActionDraft(RecoveryActionType type, String title, String description) {}
+
+    /**
+     * UV 노출량(지수 × 노출 시간) 등급. 순간 지수만 보면 "UV 9인데 10분만 뛴 경우"와
+     * "UV 4인데 90분 뛴 경우"를 구분 못 한다 — {@code docs/피부회복가이드_프롬프트.md}의 공식.
+     * OpenAI/Mock 양쪽이 같은 기준을 써야 해서 인터페이스에 둔다.
+     */
+    static UvDoseTier uvDoseTier(Integer uvIndexAtStart, Integer durationSec) {
+        if (uvIndexAtStart == null || durationSec == null) {
+            return UvDoseTier.UNKNOWN;
+        }
+        double dose = uvIndexAtStart * (durationSec / 3600.0);
+        if (dose >= 8) {
+            return UvDoseTier.VERY_HIGH;
+        } else if (dose >= 5) {
+            return UvDoseTier.HIGH;
+        } else if (dose >= 2) {
+            return UvDoseTier.MODERATE;
+        }
+        return UvDoseTier.LOW;
+    }
+
+    enum UvDoseTier {
+        LOW("낮음"), MODERATE("보통"), HIGH("높음"), VERY_HIGH("매우 높음"), UNKNOWN("알수없음");
+
+        private final String label;
+
+        UvDoseTier(String label) {
+            this.label = label;
+        }
+
+        String label() {
+            return label;
+        }
+
+        boolean isHighOrAbove() {
+            return this == HIGH || this == VERY_HIGH;
+        }
+    }
 }

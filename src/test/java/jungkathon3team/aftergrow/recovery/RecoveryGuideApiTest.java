@@ -100,13 +100,14 @@ class RecoveryGuideApiTest {
     }
 
     @Test
-    void UV가_높은_세션에는_UV_CAUTION_액션이_추가된다() throws Exception {
-        RunningSession session = endedSession(user, 6.0, Intensity.HIGH, 9);
+    void UV_노출량이_높은_세션에는_UV_CARE_액션이_추가된다() throws Exception {
+        // endedSession의 durationSec은 1800초(30분) 고정 — UV 10 × 0.5h = 5.0(dose)로 '높음' 등급을 확실히 넘긴다.
+        RunningSession session = endedSession(user, 6.0, Intensity.HIGH, 10);
 
         mockMvc.perform(post("/running-sessions/{id}/recovery-guide", session.getRunningSessionId())
                         .header("Authorization", bearer))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.actions[?(@.type == 'UV_CAUTION')]").isNotEmpty());
+                .andExpect(jsonPath("$.data.actions[?(@.type == 'UV_CARE')]").isNotEmpty());
     }
 
     @Test
