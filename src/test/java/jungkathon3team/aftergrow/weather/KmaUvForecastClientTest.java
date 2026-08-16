@@ -134,6 +134,23 @@ class KmaUvForecastClientTest {
                 .isInstanceOf(BusinessException.class);
     }
 
+    /**
+     * 게이트웨이 거절은 정상 응답과 봉투가 다르다. 이걸 따로 보지 않으면 로그에 빈 값만 찍혀
+     * 활용신청 문제인지 경로 문제인지 알 수 없다.
+     */
+    @Test
+    void 게이트웨이_거절_봉투도_E5011로_처리한다() {
+        UvForecastClient client = clientReturning("""
+                {"OpenAPI_ServiceResponse":{"cmmMsgHeader":{
+                  "errMsg":"NO_OPENAPI_SERVICE_ERROR",
+                  "returnAuthMsg":"해당 오픈API 서비스가 없거나 폐기됨",
+                  "returnReasonCode":"12"}}}
+                """);
+
+        assertThatThrownBy(() -> client.fetchDailyForecast("1100000000", DATE))
+                .isInstanceOf(BusinessException.class);
+    }
+
     @Test
     void 항목이_비어_있으면_E5011() {
         UvForecastClient client = clientReturning("""

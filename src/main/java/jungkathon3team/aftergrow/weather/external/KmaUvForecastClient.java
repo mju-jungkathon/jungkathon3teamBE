@@ -120,6 +120,21 @@ public class KmaUvForecastClient implements UvForecastClient {
             throw new BusinessException(ErrorCode.UV_FORECAST_FAILED); // E5011
         }
 
+        // 게이트웨이(공공데이터포털) 단계에서 막히면 정상 응답과 아예 다른 봉투로 온다.
+        // 이걸 먼저 보지 않으면 "resultCode= resultMsg=" 처럼 빈 값만 찍혀 원인을 알 수 없다.
+        JsonNode gatewayError = root.path("OpenAPI_ServiceResponse").path("cmmMsgHeader");
+        if (!gatewayError.isMissingNode()) {
+            String errMsg = gatewayError.path("errMsg").asString("");
+            log.warn("기상청 게이트웨이 거절: {} ({}) areaNo={}"
+                            + " — NO_OPENAPI_SERVICE_ERROR는 경로 오류와 '해당 서비스 활용신청 안 됨'을"
+                            + " 구분하지 않습니다. 공공데이터포털 마이페이지에서 '생활기상지수 조회서비스(4.0)'"
+                            + " 승인 여부를 확인하세요.",
+                    errMsg,
+                    gatewayError.path("returnAuthMsg").asString(""),
+                    areaNo);
+            throw new BusinessException(ErrorCode.UV_FORECAST_FAILED); // E5011
+        }
+
         String resultCode = root.path("response").path("header").path("resultCode").asString("");
         if (!RESULT_CODE_OK.equals(resultCode)) {
             log.warn("기상청 자외선지수 오류 resultCode={} resultMsg={} areaNo={}",
