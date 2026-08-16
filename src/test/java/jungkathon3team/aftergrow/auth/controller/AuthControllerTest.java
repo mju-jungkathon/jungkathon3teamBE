@@ -217,6 +217,42 @@ class AuthControllerTest {
                 .getMarketingAgreedAt()).isNotNull();
     }
 
+    /**
+     * 온보딩(목표 저장)이 가입 직후 바로 이어지므로 토큰을 함께 내려준다.
+     * 없으면 클라이언트가 /auth/login을 한 번 더 호출해야 한다.
+     */
+    @Test
+    void 회원가입_응답에_토큰이_포함된다() throws Exception {
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(SIGNUP_BODY))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.accessToken").exists())
+                .andExpect(jsonPath("$.data.refreshToken").exists())
+                .andExpect(jsonPath("$.data.expiresIn").isNumber());
+    }
+
+    /** 토큰이 실제로 인증에 쓸 수 있는 것인지 확인한다(형식만 맞는 문자열이면 의미가 없다). */
+    @Test
+    void 회원가입에서_받은_토큰으로_바로_인증된_API를_호출할_수_있다() throws Exception {
+        String body = mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(SIGNUP_BODY))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        String accessToken = com.jayway.jsonpath.JsonPath.read(body, "$.data.accessToken");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/users/me/goal")
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"goalType\":\"FITNESS\",\"weeklyRunGoal\":3}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.goalType").value("FITNESS"))
+                .andExpect(jsonPath("$.data.weeklyRunGoal").value(3));
+    }
+
     @Test
     void 회원가입은_인증_없이_호출할_수_있다() throws Exception {
         mockMvc.perform(post("/auth/signup")

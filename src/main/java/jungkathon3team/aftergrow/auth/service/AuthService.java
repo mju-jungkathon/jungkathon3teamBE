@@ -37,13 +37,23 @@ public class AuthService {
             throw new BusinessException(ErrorCode.DUPLICATE_EMAIL);
         }
 
-        User user = User.signup(
+        User user = userRepository.save(User.signup(
                 request.email(),
                 passwordEncoder.encode(request.password()),
                 request.nickname(),
-                request.marketingAgreed());
+                request.marketingAgreed()));
 
-        return SignupResponse.from(userRepository.save(user));
+        // 가입 직후 온보딩(목표 저장)이 바로 이어지므로 로그인과 같은 방식으로 토큰을 발급한다.
+        // refresh를 Redis에 남기는 것까지 로그인과 동일해야 로그아웃이 똑같이 동작한다.
+        UUID userId = user.getUserId();
+        String refreshToken = jwtTokenProvider.createRefreshToken(userId);
+        refreshTokenStore.save(userId, refreshToken, jwtTokenProvider.getRefreshTokenTtl());
+
+        return SignupResponse.of(
+                user,
+                jwtTokenProvider.createAccessToken(userId),
+                refreshToken,
+                jwtTokenProvider.getAccessTokenTtl().toSeconds());
     }
 
     @Transactional(readOnly = true)
