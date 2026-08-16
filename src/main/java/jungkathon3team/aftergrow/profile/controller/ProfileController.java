@@ -6,6 +6,7 @@ import jakarta.validation.Valid;
 import jungkathon3team.aftergrow.common.response.ApiResponse;
 import jungkathon3team.aftergrow.profile.dto.GoalUpdateDto;
 import jungkathon3team.aftergrow.profile.dto.IntegrationResponse;
+import jungkathon3team.aftergrow.profile.dto.IntegrationUpdateDto;
 import jungkathon3team.aftergrow.profile.dto.NotificationUpdateDto;
 import jungkathon3team.aftergrow.profile.dto.ProfileResponse;
 import jungkathon3team.aftergrow.profile.service.ProfileService;
@@ -46,6 +47,17 @@ public class ProfileController {
     @GetMapping("/integrations")
     public ApiResponse<IntegrationResponse> integrations(@AuthenticationPrincipal UUID userId) {
         return ApiResponse.ok(profileService.getIntegrations(userId));
+    }
+
+    @Operation(summary = "연동/권한 상태 갱신",
+            description = "부분 수정 — 보낸 필드만 변경됩니다. 브라우저에서 실제로 권한을 요청한 결과를 "
+                    + "서버에 동기화하는 용도이며, 저장된 값은 표시용 캐시일 뿐 권한 검증 수단이 아닙니다.")
+    @PatchMapping("/integrations")
+    public ApiResponse<IntegrationResponse> updateIntegrations(
+            @AuthenticationPrincipal UUID userId,
+            @Valid @RequestBody IntegrationUpdateDto.Request request
+    ) {
+        return ApiResponse.ok(profileService.updateIntegrations(userId, request));
     }
 
     @Operation(summary = "알림 설정 변경", description = "부분 수정 — 보낸 필드만 변경됩니다.")

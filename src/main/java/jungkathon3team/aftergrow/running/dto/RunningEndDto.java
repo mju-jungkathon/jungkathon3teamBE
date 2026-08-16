@@ -1,13 +1,17 @@
 package jungkathon3team.aftergrow.running.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 import jungkathon3team.aftergrow.heartrate.entity.HeartRateSource;
 import jungkathon3team.aftergrow.running.entity.Intensity;
+import jungkathon3team.aftergrow.running.entity.RoutePoint;
 import jungkathon3team.aftergrow.running.entity.RunningStatus;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 public class RunningEndDto {
@@ -16,7 +20,15 @@ public class RunningEndDto {
             @NotNull LocalDateTime endedAt,
             @NotNull @Positive Integer durationSec,
             @NotNull @PositiveOrZero Double distanceKm,
-            @NotNull Intensity intensity
+            @NotNull Intensity intensity,
+
+            /*
+             * 러닝 중 수집한 GPS 트랙. 러닝 중에는 보내지 않고 종료 시점에 배열 통째로 한 번 보낸다.
+             * 경로 없이 종료하는 클라이언트도 있으므로 선택 항목이다.
+             * 상한은 클라이언트가 스로틀링(5~10초 간격)했을 때의 여유값 — 2시간 러닝도 1500점 남짓이다.
+             */
+            @Valid @Size(max = 10_000, message = "경로 점 개수는 10000개를 넘을 수 없습니다.")
+            List<RoutePoint> routePath
     ) {}
 
     public record Response(

@@ -151,7 +151,7 @@ class HomeDashboardTest {
 
     private RunningSession completed(LocalDateTime startedAt, double distanceKm, int uvIndex) {
         RunningSession s = RunningSession.start(user, startedAt, 37.5, 127.0, uvIndex);
-        s.end(startedAt.plusMinutes(30), 1800, distanceKm, Intensity.MODERATE);
+        s.end(startedAt.plusMinutes(30), 1800, distanceKm, Intensity.MODERATE, null);
         return runningSessionRepository.save(s);
     }
 

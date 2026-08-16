@@ -2,13 +2,16 @@ package jungkathon3team.aftergrow.common.exception;
 
 import jungkathon3team.aftergrow.common.response.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.MessageSourceResolvable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -52,6 +55,31 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
         log.debug("경로/파라미터 타입 불일치: {}", e.getName());
         return toResponse(ErrorCode.INVALID_REQUEST, ErrorCode.INVALID_REQUEST.getMessage());
+    }
+
+    /**
+     * 필수 쿼리 파라미터 누락(예: {@code /running-sessions/prepare}에 lat/lng 없음).
+     * 핸들러가 없으면 catch-all로 떨어져 500 E5000이 되는데, 클라이언트 잘못이므로 400이어야 합니다.
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingParameter(MissingServletRequestParameterException e) {
+        log.debug("필수 파라미터 누락: {}", e.getParameterName());
+        return toResponse(ErrorCode.INVALID_REQUEST,
+                "필수 파라미터 '%s'가 없습니다.".formatted(e.getParameterName()));
+    }
+
+    /**
+     * 컨트롤러 메서드 파라미터에 직접 붙은 제약(@Min/@Max 등) 위반.
+     * 본문 검증({@code @Valid})과 달리 MethodArgumentNotValidException이 아니라 이쪽으로 옵니다.
+     */
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleParameterValidation(HandlerMethodValidationException e) {
+        String message = e.getParameterValidationResults().stream()
+                .flatMap(result -> result.getResolvableErrors().stream())
+                .findFirst()
+                .map(MessageSourceResolvable::getDefaultMessage)
+                .orElse(ErrorCode.INVALID_REQUEST.getMessage());
+        return toResponse(ErrorCode.INVALID_REQUEST, message);
     }
 
     /** 매핑된 핸들러가 없는 경로. 존재하지 않는 URL은 서버 오류가 아니라 404입니다. */

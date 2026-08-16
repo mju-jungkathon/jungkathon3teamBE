@@ -112,6 +112,7 @@
 | E4091 | 409 | 이미 가입된 이메일 (회원가입) | 이미 사용 중인 이메일입니다. |
 | E5000 | 500 | 서버 오류 | 서버 오류가 발생했습니다. |
 | E5010 | 502 | 애플 헬스 연동 실패 | 애플 헬스 데이터를 가져오지 못했습니다. |
+| E5011 | 502 | 자외선 예보(기상청) 연동 실패 | 자외선 예보를 가져오지 못했습니다. |
 
 > 📌 코드는 대체로 `E{HTTP 상태코드}{일련번호}` 형태지만 **`E5010`만 502를 가리켜 규칙에서 벗어납니다.**
 > 상태코드 502가 의미상 맞아(외부 서비스 연동 실패) 서버는 이 표를 그대로 구현했습니다.
@@ -146,12 +147,25 @@
 **Request**
 
 ```json
-{ "email": "you@example.com", "password": "string", "nickname": "김러너" }
+{
+  "email": "you@example.com",
+  "password": "string",
+  "nickname": "김러너",
+  "agreeTerms": true,
+  "agreePrivacy": true,
+  "agreeMarketing": false
+}
 ```
 
 - `email`: 필수, 이메일 형식, 255자 이하
 - `password`: 필수, 8자 이상 64자 이하 (BCrypt 해시로 저장, 응답에 절대 포함되지 않음)
 - `nickname`: 필수, 100자 이하
+- `agreeTerms` / `agreePrivacy`: **필수 약관.** `true`가 아니거나 생략하면 400 `E4001`
+- `agreeMarketing`: 선택. 생략하면 동의하지 않은 것으로 봅니다
+
+> 서버는 boolean이 아니라 **동의 시각**(`terms_agreed_at` 등)을 저장합니다. 약관은 개정될 수 있어
+> "언제 동의했는가"가 필요하기 때문입니다. 마케팅 동의는 값이 있으면 동의, `NULL`이면 미동의입니다.
+> 동의 시각은 응답에 포함되지 않습니다.
 
 **Response 201**
 
@@ -370,9 +384,22 @@
   "endedAt": "2026-08-04T06:54:12+09:00",
   "durationSec": 1452,
   "distanceKm": 4.8,
-  "intensity": "MODERATE"
+  "intensity": "MODERATE",
+  "routePath": [
+    { "lat": 37.5440, "lng": 127.0557, "t": 0 },
+    { "lat": 37.5442, "lng": 127.0559, "t": 8 }
+  ]
 }
 ```
+
+- `routePath`: **선택.** 러닝 중 수집한 GPS 트랙을 종료 시점에 배열 통째로 한 번 보냅니다
+  (러닝 중에는 보내지 않습니다). `t`는 러닝 시작부터의 경과 초입니다.
+  - 프론트는 5~10초 간격 또는 일정 거리 이상 이동했을 때만 기록하세요(스로틀링).
+  - 점 개수 상한 10,000개, `lat`/`lng`는 각각 ±90 / ±180 범위. 벗어나면 400 `E4001`
+  - 생략하면 기존에 저장된 경로를 지우지 않습니다(멱등 재호출 대비).
+
+> ⚠️ **저장은 되지만 아직 읽는 API가 없습니다.** 러닝 세션 조회 엔드포인트가 명세에 없어,
+> History 화면이 경로를 그리려면 조회 API를 따로 만들어야 합니다.
 
 **Response 200**
 
@@ -652,7 +679,7 @@
 ```json
 {
   "nickname": "김러너",
-  "goal": { "goalType": "체력 증진", "weeklyRunGoal": 5 },
+  "goal": { "goalType": "FITNESS", "weeklyRunGoal": 5 },
   "integrations": {
     "locationLinked": true,
     "cameraPermission": true,
@@ -671,17 +698,32 @@
 
 `PATCH /users/me/goal`
 
-**Request**
+**Request** — 부분 수정. 보낸 필드만 변경됩니다.
 
 ```json
-{ "goalType": "체력 증진", "weeklyRunGoal": 5 }
+{ "goalType": "FITNESS", "weeklyRunGoal": 5 }
 ```
 
 **Response 200**
 
 ```json
-{ "goalType": "체력 증진", "weeklyRunGoal": 5, "updatedAt": "2026-08-04T22:10:00+09:00" }
+{ "goalType": "FITNESS", "weeklyRunGoal": 5, "updatedAt": "2026-08-04T22:10:00+09:00" }
 ```
+
+**두 필드는 서로 다른 개념입니다.**
+
+| 필드 | 역할 | 값 |
+| --- | --- | --- |
+| `goalType` | 운동 **목적** | `FITNESS`(체력 증진) \| `WEIGHT_LOSS`(체중 감량) \| `RACE_TRAINING`(완주 훈련) \| `STRESS_RELIEF`(스트레스 해소) |
+| `weeklyRunGoal` | 주간 목표 **횟수** | 0 이상 정수. **km가 아니라 횟수입니다** |
+
+- 후보에 없는 `goalType`(과거 예시값 `WEEKLY_DISTANCE` 포함)은 400 `E4001`입니다.
+  `WEEKLY_DISTANCE`는 "목적"이 아니라 "목표 산정 기준"이라 다른 개념이었고, 후보에서 제거했습니다.
+- 한글 라벨은 프론트가 매핑합니다.
+
+> **주간 "거리" 목표(홈 화면의 `14.2 / 25.0km`)는 아직 저장할 곳이 없습니다.**
+> `weeklyRunGoal`이 횟수 전용으로 확정됐기 때문입니다. `USER_GOALS`에 `weeklyDistanceGoalKm`를
+> 신설할지, 거리 목표 UI를 없앨지 팀 결정이 필요합니다. 현재는 후자(미구현)로 두었습니다.
 
 ### 7.3 연동/권한 상태 조회
 
@@ -692,6 +734,45 @@
 ```json
 { "locationLinked": true, "cameraPermission": true, "locationPermission": true, "appleHealthLinked": true }
 ```
+
+### 7.5 연동/권한 상태 갱신
+
+`PATCH /users/me/integrations`
+
+**Request** — 부분 수정. 보낸 필드만 변경됩니다.
+
+```json
+{ "cameraPermission": true, "locationPermission": false }
+```
+
+**Response 200** — 7.3과 같은 형태
+
+```json
+{ "locationLinked": false, "cameraPermission": true, "locationPermission": false, "appleHealthLinked": false }
+```
+
+- `appleHealthLinked`는 여기서 바꿀 수 없습니다 — §4.3 `POST /integrations/apple-health/link`가 담당합니다.
+- 설정 행이 없던 사용자는 이 호출 시점에 생성됩니다.
+
+> **서버 값은 "제어"가 아니라 "표시"용입니다.** 브라우저 권한(GPS·카메라)은 사용자가 앱 밖에서
+> 언제든 바꿀 수 있어 서버 DB 값은 항상 참고용 캐시일 뿐, 권한 검증 수단이 될 수 없습니다.
+> 기능 진입 시엔 항상 `navigator.geolocation`/`getUserMedia`를 다시 호출해 그 순간의 성공/실패로
+> 판단하고, 그 결과를 이 API로 동기화해 프로필 화면에 "지금 상태"를 보여주는 용도로만 쓰세요.
+>
+> ```js
+> // ❌ 서버 값만 믿고 기능 진입
+> if (integrationStatus.cameraPermission) navigateToRppgScreen();
+>
+> // ✅ 매번 실제로 시도하고, 결과를 서버에도 동기화
+> try {
+>   await navigator.mediaDevices.getUserMedia({ video: true });
+>   navigateToRppgScreen();
+>   syncIntegrationStatus({ cameraPermission: true });
+> } catch {
+>   showPermissionDeniedGuide();
+>   syncIntegrationStatus({ cameraPermission: false });
+> }
+> ```
 
 ### 7.4 알림 설정 변경
 
@@ -711,28 +792,85 @@
 
 ---
 
+## R8. 날씨
+
+### 8.1 시간대별 UV 예보
+
+`GET /weather/uv-forecast?lat={lat}&lng={lng}`
+
+홈 화면의 UV 그래프용입니다. 러닝 세션과 무관하게 "이 위치의 오늘 하루 UV"를 반환합니다.
+
+**Response 200**
+
+```json
+{
+  "hourly": [
+    { "hour": "00", "uv": 0 },
+    { "hour": "02", "uv": 0 },
+    { "hour": "04", "uv": 1 },
+    { "hour": "22", "uv": 0 }
+  ]
+}
+```
+
+- `hourly`는 **항상 12개**입니다 — 00시부터 2시간 간격(`00, 02, … 22`). 길이 검사 없이 그대로 그래프에 넣으면 됩니다.
+- **"지금 UV"와 "UV가 낮은 추천 시간대"는 이 배열 하나에서 계산하세요.** 별도 API를 두지 않았습니다.
+- `lat`/`lng`가 없으면 400 `E4001`, 범위(±90 / ±180)를 벗어나도 400 `E4001`입니다.
+- 인증이 필요합니다.
+
+**에러**
+
+| 상황 | 코드 |
+| --- | --- |
+| 좌표 누락/범위 초과 | 400 `E4001` |
+| 기상청 API 실패(키 오류·장애·응답 없음) | 502 `E5011` |
+
+**캐싱 (서버 구현 참고)**
+
+- 캐시 키 `uv:forecast:{areaNo}:{yyyy-MM-dd}`, TTL 6시간, Redis.
+- **키에 사용자 정보가 들어가지 않습니다.** 같은 광역시·도의 모든 사용자가 캐시 한 벌을 공유합니다.
+- 하루치를 배열 하나로 저장합니다 — 기상청이 애초에 하루 전체를 한 번에 주므로 시간대별로 쪼개면 외부 호출만 늘어납니다.
+- Redis가 죽어도 이 API는 동작합니다(캐시를 건너뛰고 매번 기상청에 조회). refresh token과 달리 정확성에 관여하지 않기 때문입니다.
+
+> 📌 **기상청 자외선지수 API는 격자좌표(nx/ny)가 아니라 행정구역코드(`areaNo`)를 받습니다.**
+> 격자좌표를 쓰는 건 초단기·단기예보이고 거기엔 UV 항목이 없습니다. 서버는 위경도를 광역시·도
+> 17개 중 최근접 지점으로 매핑합니다. UV는 수십 km 단위로 거의 균일해 실용상 충분합니다.
+>
+> 기상청은 발표시각(하루 두 번) 기준 **3시간 간격**으로 주므로 서버가 2시간 격자로 선형 보간합니다.
+> 발표 이전 구간은 0으로 채웁니다 — 비는 건 새벽뿐이고 새벽 UV는 실제로 0입니다.
+>
+> `KMA_AUTH_KEY`가 설정돼 있지 않으면 **모의값**으로 응답합니다(CI가 외부 API에 의존하지 않도록).
+> 응답 형태는 동일하므로 프론트 연동에는 지장이 없습니다.
+>
+> 키는 **공공데이터포털(data.go.kr)** 것이어야 합니다. 기상청 API허브(apihub.kma.go.kr)에는 자외선 *예보*가
+> 없습니다(관측만 있음). 엔드포인트는 포털 표시 버전("4.0")이 아니라 `LivingWthrIdxServiceV5/getUVIdxV5`입니다.
+>
+> **실연동 검증 완료** — 서울·춘천·제주 좌표로 실제 기상청 값을 받고 Redis 캐시(TTL 6h)까지 확인했습니다.
+
+---
+
 ## 부록 A. 화면 ↔ 엔드포인트 매핑
 
 | 화면 | 주요 엔드포인트 |
 | --- | --- |
 | 1. 로그인/회원가입 | 1.1, 1.2 |
-| 2. 홈 | 2.1 |
+| 2. 홈 | 2.1, 8.1 |
 | 3. 러닝 준비 | 3.1, 3.2, 3.3 |
 | 4. 러닝 진행 중 | 3.4, 3.5 |
 | 5. 심박수 확인(워치) | 4.1, 4.2, 4.3 |
 | 6. 심박수 확인(rPPG 안내) | 4.4, 4.5, 4.6 |
 | 7. 오늘의 회복 가이드 | 5.1, 5.2, 5.3 |
 | 8. 측정 기록 | 6.1, 6.2 |
-| 9. 프로필 | 7.1 ~ 7.4, 1.4 |
+| 9. 프로필 | 7.1 ~ 7.5, 1.4 |
 
 ## 부록 B. 참고 엔티티
 
 | 엔티티 | 주요 필드 |
 | --- | --- |
-| User | userId, email, nickname |
-| UserGoal | goalType, weeklyRunGoal |
+| User | userId, email, nickname, termsAgreedAt, privacyAgreedAt, marketingAgreedAt |
+| UserGoal | goalType(운동 목적 enum), weeklyRunGoal(주간 횟수) |
 | NotificationSetting | runningReminderTime, weeklyReportDay/Time |
-| RunningSession | startedAt, endedAt, distanceKm, intensity, uvIndexAtStart, status |
+| RunningSession | startedAt, endedAt, distanceKm, intensity, uvIndexAtStart, status, routePath |
 | HeartRateMeasurement | heartRateSource(WATCH/RPPG), avgBpm, maxBpm, hrvMs, syncStatus, runningSessionId |
 | RecoveryGuide | measuredBpm, summaryMessage, actions[], cooldownTimerSec |
 | IntegrationStatus | locationLinked, cameraPermission, locationPermission, appleHealthLinked |

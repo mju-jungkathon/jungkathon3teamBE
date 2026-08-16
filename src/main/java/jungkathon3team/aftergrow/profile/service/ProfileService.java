@@ -6,6 +6,7 @@ import jungkathon3team.aftergrow.common.exception.BusinessException;
 import jungkathon3team.aftergrow.common.exception.ErrorCode;
 import jungkathon3team.aftergrow.profile.dto.GoalUpdateDto;
 import jungkathon3team.aftergrow.profile.dto.IntegrationResponse;
+import jungkathon3team.aftergrow.profile.dto.IntegrationUpdateDto;
 import jungkathon3team.aftergrow.profile.dto.NotificationUpdateDto;
 import jungkathon3team.aftergrow.profile.dto.ProfileResponse;
 import jungkathon3team.aftergrow.profile.entity.IntegrationStatus;
@@ -63,6 +64,20 @@ public class ProfileService {
         return integrationStatusRepository.findById(userId)
                 .map(IntegrationResponse::from)
                 .orElseGet(() -> IntegrationResponse.from(IntegrationStatus.defaults(userId)));
+    }
+
+    /**
+     * PATCH /users/me/integrations — 브라우저 권한 상태 동기화.
+     * <p>조회(7.3)만 있고 쓰기가 없어 cameraPermission/locationPermission을 갱신할 방법이 없던 공백을 메운다.
+     */
+    @Transactional
+    public IntegrationResponse updateIntegrations(UUID userId, IntegrationUpdateDto.Request request) {
+        requireUser(userId);
+        IntegrationStatus status = integrationStatusRepository.findById(userId)
+                .orElseGet(() -> IntegrationStatus.of(userId));
+        status.updatePermissions(request.cameraPermission(), request.locationPermission());
+        integrationStatusRepository.save(status);
+        return IntegrationResponse.from(status);
     }
 
     /** 7.4 PATCH /users/me/notifications */

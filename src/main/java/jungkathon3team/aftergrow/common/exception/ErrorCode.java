@@ -24,7 +24,8 @@ public enum ErrorCode {
     RUNNING_SESSION_ALREADY_IN_PROGRESS("E4090", HttpStatus.CONFLICT, "이미 진행 중인 러닝 세션이 있습니다."),
     DUPLICATE_EMAIL("E4091", HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
     INTERNAL_ERROR("E5000", HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다."),
-    APPLE_HEALTH_SYNC_FAILED("E5010", HttpStatus.BAD_GATEWAY, "애플 헬스 데이터를 가져오지 못했습니다.");
+    APPLE_HEALTH_SYNC_FAILED("E5010", HttpStatus.BAD_GATEWAY, "애플 헬스 데이터를 가져오지 못했습니다."),
+    UV_FORECAST_FAILED("E5011", HttpStatus.BAD_GATEWAY, "자외선 예보를 가져오지 못했습니다.");
 
     private final String code;
     private final HttpStatus status;

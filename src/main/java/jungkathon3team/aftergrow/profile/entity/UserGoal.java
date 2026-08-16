@@ -2,6 +2,8 @@ package jungkathon3team.aftergrow.profile.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
@@ -30,9 +32,12 @@ public class UserGoal {
     @Column(name = "user_id")
     private UUID userId;
 
+    /** 러닝 목적. 온보딩 전에는 아직 고르지 않았을 수 있어 null 허용. */
+    @Enumerated(EnumType.STRING)
     @Column(name = "goal_type", length = 50)
-    private String goalType;
+    private GoalType goalType;
 
+    /** 주간 목표 <b>횟수</b>(주 몇 회). 거리가 아니다 — 거리 목표는 아직 저장할 곳이 없다. */
     @Column(name = "weekly_run_goal")
     private Integer weeklyRunGoal;
 
@@ -52,7 +57,7 @@ public class UserGoal {
      * <p>{@code updated_at}은 응답에 즉시 실려야 하므로 JPA 생명주기 콜백(flush 시점) 대신
      * 이 메서드에서 직접 갱신한다.
      */
-    public void updatePartial(String goalType, Integer weeklyRunGoal) {
+    public void updatePartial(GoalType goalType, Integer weeklyRunGoal) {
         if (goalType != null) {
             this.goalType = goalType;
         }

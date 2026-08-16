@@ -32,7 +32,8 @@ class AuthControllerTest {
     private PasswordEncoder passwordEncoder;
 
     private static final String SIGNUP_BODY = """
-            { "email": "runner@example.com", "password": "password123", "nickname": "김러너" }
+            { "email": "runner@example.com", "password": "password123", "nickname": "김러너",
+              "agreeTerms": true, "agreePrivacy": true, "agreeMarketing": false }
             """;
 
     @BeforeEach
@@ -112,7 +113,8 @@ class AuthControllerTest {
         mockMvc.perform(post("/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                { "email": "not-an-email", "password": "password123", "nickname": "김러너" }
+                                { "email": "not-an-email", "password": "password123", "nickname": "김러너",
+                                  "agreeTerms": true, "agreePrivacy": true }
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("E4001"))
@@ -147,10 +149,72 @@ class AuthControllerTest {
         mockMvc.perform(post("/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                { "email": "runner@example.com", "password": "short", "nickname": "김러너" }
+                                { "email": "runner@example.com", "password": "short", "nickname": "김러너",
+                                  "agreeTerms": true, "agreePrivacy": true }
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("E4001"));
+    }
+
+    @Test
+    void 필수_약관에_동의하지_않으면_400과_E4001을_반환한다() throws Exception {
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "email": "runner@example.com", "password": "password123", "nickname": "김러너",
+                                  "agreeTerms": false, "agreePrivacy": true }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("E4001"))
+                .andExpect(jsonPath("$.error.message").value("이용약관 동의는 필수입니다."));
+
+        assertThat(userRepository.findByEmail("runner@example.com")).isEmpty();
+    }
+
+    /** @AssertTrue는 null을 유효로 보므로, 필드를 생략하는 것만으로 뚫리지 않는지 확인한다. */
+    @Test
+    void 약관_동의_필드를_생략해도_400과_E4001을_반환한다() throws Exception {
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "email": "runner@example.com", "password": "password123", "nickname": "김러너" }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("E4001"));
+
+        assertThat(userRepository.findByEmail("runner@example.com")).isEmpty();
+    }
+
+    @Test
+    void 필수_약관_동의_시각이_저장된다() throws Exception {
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(SIGNUP_BODY))
+                .andExpect(status().isCreated());
+
+        User saved = userRepository.findByEmail("runner@example.com").orElseThrow();
+        assertThat(saved.getTermsAgreedAt()).isNotNull();
+        assertThat(saved.getPrivacyAgreedAt()).isNotNull();
+    }
+
+    @Test
+    void 마케팅_동의는_동의한_경우에만_시각이_남는다() throws Exception {
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(SIGNUP_BODY))
+                .andExpect(status().isCreated());
+        assertThat(userRepository.findByEmail("runner@example.com").orElseThrow()
+                .getMarketingAgreedAt()).isNull();
+
+        mockMvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "email": "marketer@example.com", "password": "password123", "nickname": "김마케",
+                                  "agreeTerms": true, "agreePrivacy": true, "agreeMarketing": true }
+                                """))
+                .andExpect(status().isCreated());
+        assertThat(userRepository.findByEmail("marketer@example.com").orElseThrow()
+                .getMarketingAgreedAt()).isNotNull();
     }
 
     @Test

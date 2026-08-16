@@ -26,6 +26,8 @@ class ErrorCodeTest {
                         tuple("E4091", HttpStatus.CONFLICT),
                         tuple("E5000", HttpStatus.INTERNAL_SERVER_ERROR),
                         // 명세서상 502. E5020이 아닌 점은 명세서를 따른 것이며 오타 여부 확인 필요
-                        tuple("E5010", HttpStatus.BAD_GATEWAY));
+                        tuple("E5010", HttpStatus.BAD_GATEWAY),
+                        // UV 예보(기상청) 연동 실패. E5010의 번호 규칙을 그대로 이어받았다
+                        tuple("E5011", HttpStatus.BAD_GATEWAY));
     }
 }

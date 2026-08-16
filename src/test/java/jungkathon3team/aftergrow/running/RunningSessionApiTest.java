@@ -3,6 +3,8 @@ package jungkathon3team.aftergrow.running;
 import jungkathon3team.aftergrow.auth.entity.User;
 import jungkathon3team.aftergrow.auth.jwt.JwtTokenProvider;
 import jungkathon3team.aftergrow.auth.repository.UserRepository;
+import jakarta.persistence.EntityManager;
+import jungkathon3team.aftergrow.running.entity.RoutePoint;
 import jungkathon3team.aftergrow.running.entity.RunningSession;
 import jungkathon3team.aftergrow.running.repository.RunningSessionRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,8 +17,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -44,6 +48,10 @@ class RunningSessionApiTest {
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
+
+    /** JSONB 왕복을 보려면 영속성 컨텍스트 캐시를 비우고 DB에서 다시 읽어야 한다. */
+    @Autowired
+    private EntityManager entityManager;
 
     private User user;
     private String bearer;
@@ -129,6 +137,62 @@ class RunningSessionApiTest {
                         .content(body))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("ENDED"));
+    }
+
+    /** JSONB 컬럼 왕복(직렬화 → 저장 → 역직렬화)이 실제로 동작하는지 확인한다. */
+    @Test
+    void 러닝_종료시_보낸_GPS_경로가_저장된다() throws Exception {
+        RunningSession session = inProgress(user, LocalDateTime.now().minusMinutes(30));
+
+        mockMvc.perform(post("/running-sessions/{id}/end", session.getRunningSessionId())
+                        .header("Authorization", bearer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"endedAt":"2026-08-11T07:30:00","durationSec":1800,"distanceKm":5.0,
+                                 "intensity":"MODERATE",
+                                 "routePath":[{"lat":37.5440,"lng":127.0557,"t":0},
+                                              {"lat":37.5442,"lng":127.0559,"t":8}]}
+                                """))
+                .andExpect(status().isOk());
+
+        runningSessionRepository.flush();
+        entityManager.clear();
+
+        List<RoutePoint> saved = runningSessionRepository.findById(session.getRunningSessionId())
+                .orElseThrow().getRoutePath();
+        assertThat(saved).hasSize(2);
+        assertThat(saved.get(0)).isEqualTo(new RoutePoint(37.5440, 127.0557, 0));
+        assertThat(saved.get(1).t()).isEqualTo(8);
+    }
+
+    @Test
+    void 경로를_보내지_않고_종료해도_성공한다() throws Exception {
+        RunningSession session = inProgress(user, LocalDateTime.now().minusMinutes(30));
+
+        mockMvc.perform(post("/running-sessions/{id}/end", session.getRunningSessionId())
+                        .header("Authorization", bearer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"endedAt\":\"2026-08-11T07:30:00\",\"durationSec\":1800,\"distanceKm\":5.0,\"intensity\":\"MODERATE\"}"))
+                .andExpect(status().isOk());
+
+        assertThat(runningSessionRepository.findById(session.getRunningSessionId())
+                .orElseThrow().getRoutePath()).isNull();
+    }
+
+    @Test
+    void 경로_점의_위경도_범위가_벗어나면_400과_E4001을_반환한다() throws Exception {
+        RunningSession session = inProgress(user, LocalDateTime.now().minusMinutes(30));
+
+        mockMvc.perform(post("/running-sessions/{id}/end", session.getRunningSessionId())
+                        .header("Authorization", bearer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"endedAt":"2026-08-11T07:30:00","durationSec":1800,"distanceKm":5.0,
+                                 "intensity":"MODERATE",
+                                 "routePath":[{"lat":999.0,"lng":127.0557,"t":0}]}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("E4001"));
     }
 
     @Test

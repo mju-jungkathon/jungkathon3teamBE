@@ -21,7 +21,7 @@ docker compose up -d          # PostgreSQL + Redis (실행 필수, 아래 참고
 
 **`test`/`build`는 Docker 컨테이너가 떠 있어야 통과합니다.** `contextLoads()`가 `@SpringBootTest`로 실제 PostgreSQL에 붙기 때문에 컨테이너 없이 돌리면 HibernateException으로 실패합니다. 빌드 실패 시 가장 먼저 `docker compose ps`로 postgres/redis가 healthy인지 확인하세요.
 
-테스트는 22개 클래스 153개 `@Test` 메서드이고, `running`(`RunningSessionApiTest`)·`home`(`HomeDashboardTest`)·`heartrate`(`HeartRateControllerTest`)·`profile`(`ProfileApiTest`)을 포함해 모든 도메인에 통합 테스트가 있습니다. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
+테스트는 25개 클래스 190개 `@Test` 메서드이고, `running`(`RunningSessionApiTest`)·`home`(`HomeDashboardTest`)·`heartrate`(`HeartRateControllerTest`)·`profile`(`ProfileApiTest`)을 포함해 모든 도메인에 통합 테스트가 있습니다. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
 
 CI 환경을 로컬에서 재현하려면 (프로파일별로 설정이 달라 한쪽만 통과하는 일이 생깁니다):
 
@@ -40,7 +40,9 @@ SPRING_PROFILES_ACTIVE=test SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:54
 
 CI(`.github/workflows/test.yml`)는 `SPRING_PROFILES_ACTIVE=test`로 돌고, **datasource/redis 접속 정보만 환경변수로 주입**합니다. 나머지(`jwt.*`, `ddl-auto`, flyway)는 커밋되는 `src/test/resources/application-test.yml`에 있습니다.
 
-> ⚠️ **설정 키를 추가할 때는 세 파일 전부에 넣으세요** — `application-local.yml`(로컬), `src/test/resources/application-test.yml`(CI), `src/main/resources/application-prod.yml`(배포). local에만 넣으면 로컬 테스트는 통과하고 CI만 `PlaceholderResolutionException`으로 죽습니다. 실제로 `jwt.*`에서 한 번 겪었습니다. **prod만 빠뜨리면 로컬과 CI가 전부 통과하고 배포된 서버만 기동 시 죽습니다** — 가장 늦게 발견되는 형태입니다.
+**외부 API 키(`OPENAI_API_KEY`, `KMA_AUTH_KEY`)는 예외입니다.** 커밋되는 `application.yml`에 `${KMA_AUTH_KEY:}`처럼 **기본값 있는** 플레이스홀더로 두므로 프로파일별 yml 세 곳에 넣을 필요가 없습니다. 실제 값은 로컬은 `application-local.yml`, 배포는 EC2의 `.env`(+ `docker-compose.prod.yml`의 environment 한 줄)에 넣습니다. **`gradlew bootRun`은 `.env`를 읽지 않습니다** — `.env`는 docker compose 전용이라, 로컬에서 실제 키로 테스트하려면 `application-local.yml`에 넣어야 합니다. 키가 비면 각각 규칙 기반 회복 가이드 / 모의 UV 예보로 폴백합니다.
+
+> ⚠️ **(기본값 없는) 설정 키를 추가할 때는 세 파일 전부에 넣으세요** — `application-local.yml`(로컬), `src/test/resources/application-test.yml`(CI), `src/main/resources/application-prod.yml`(배포). local에만 넣으면 로컬 테스트는 통과하고 CI만 `PlaceholderResolutionException`으로 죽습니다. 실제로 `jwt.*`에서 한 번 겪었습니다. **prod만 빠뜨리면 로컬과 CI가 전부 통과하고 배포된 서버만 기동 시 죽습니다** — 가장 늦게 발견되는 형태입니다.
 
 `gradlew`는 git에 `100755`로 기록돼 있어야 합니다. Windows는 `core.fileMode=false`라 권한 비트를 무시하므로, 실수로 `100644`가 되면 로컬에선 멀쩡하고 Ubuntu 러너에서만 `Permission denied`(exit 126)로 죽습니다. `git ls-files -s gradlew`로 확인하고 `git update-index --chmod=+x gradlew`로 고칩니다.
 
@@ -102,13 +104,13 @@ Spring Security는 **7.0.6**, Spring Framework는 7.0.8입니다. 람다 DSL만 
 ### 저장소 역할 분담
 
 - **PostgreSQL** — 서버가 재시작돼도 남아야 하는 것: 사용자, 러닝 세션 결과, 심박수 기록.
-- **Redis** — 사라져도 다시 만들 수 있는 것: refresh token, rate limit 카운터. (러닝 진행 중 상태도 원래 Redis 담당이었지만 **현재는 Postgres 행을 직접 갱신**합니다 — 실제로 Redis를 쓰는 건 refresh token(`RefreshTokenStore`)과 rPPG 측정 세션(`heartrate/repository/RppgSessionStore`) 둘입니다. Redis가 죽으면 로그인·재발급뿐 아니라 rPPG 재측정 플로우도 함께 막힙니다 — `/actuator/health`가 503을 돌려주는 것도 이 때문입니다.)
+- **Redis** — 사라져도 다시 만들 수 있는 것: refresh token, rate limit 카운터. (러닝 진행 중 상태도 원래 Redis 담당이었지만 **현재는 Postgres 행을 직접 갱신**합니다 — 실제로 Redis를 쓰는 건 refresh token(`RefreshTokenStore`), rPPG 측정 세션(`heartrate/repository/RppgSessionStore`), UV 예보 캐시(`weather/service/UvForecastService`) 셋입니다. Redis가 죽으면 로그인·재발급뿐 아니라 rPPG 재측정 플로우도 함께 막힙니다 — `/actuator/health`가 503을 돌려주는 것도 이 때문입니다. **UV 예보만은 예외로 Redis 없이도 동작합니다**(캐시를 건너뛰고 매번 기상청에 조회) — 캐시가 정확성이 아니라 외부 호출 횟수에만 관여하기 때문입니다.)
 
 JWT는 access(단명) + refresh(Redis 저장) 2종. refresh를 Redis에 두는 이유는 로그아웃 시 즉시 무효화하기 위함입니다.
 
 ### 스키마 = Flyway (엔티티가 아님)
 
-`ddl-auto: validate`입니다. `src/main/resources/db/migration/`의 V1~V9가 ERD 전체 테이블을 이미 정의해 두었습니다. **스키마를 바꿀 때는 엔티티만 고치지 말고 새 `V{n}__*.sql`을 추가하세요.** 이미 적용된 마이그레이션 파일은 수정하지 않습니다(checksum 불일치로 기동 실패). 엔티티와 SQL이 어긋나면 기동 시점에 validate로 걸립니다.
+`ddl-auto: validate`입니다. `src/main/resources/db/migration/`의 V1~V9가 ERD 전체 테이블을 정의하고, V10~V12가 이후 변경(약관 동의 컬럼·GPS 경로 컬럼·goal_type 데이터 정리)을 얹습니다. **스키마를 바꿀 때는 엔티티만 고치지 말고 새 `V{n}__*.sql`을 추가하세요.** 이미 적용된 마이그레이션 파일은 수정하지 않습니다(checksum 불일치로 기동 실패). 엔티티와 SQL이 어긋나면 기동 시점에 validate로 걸립니다.
 
 실제 마이그레이션에서 쓰고 있는 규칙:
 
@@ -139,8 +141,9 @@ jungkathon3team.aftergrow
 ├── home/       # GET /home 대시보드 ✔ (여러 도메인 집계)
 ├── running/    # prepare / 시작 / live / end + 스트레칭 ✔, external/에 UV·위치 목 구현
 ├── heartrate/  # 심박수 측정·애플헬스 연동 API ✔ (홈 집계에도 쓰임)
-├── profile/    # 프로필 API ✔ (홈 집계에도 쓰임)
-├── recovery/   # 미착수 (패키지 자체가 없음)
+├── profile/    # 프로필 API ✔ (목표·알림·권한 상태 수정 포함, 홈 집계에도 쓰임)
+├── recovery/   # AI 회복 가이드 ✔ (external/에 OpenAI 연동 + 규칙 기반 폴백)
+├── weather/    # 시간대별 UV 예보 ✔ (기상청 연동 + Redis 캐시, external/에 Mock 폴백)
 └── common/     # ApiResponse<T>, ErrorCode, 예외 처리, SecurityConfig, OpenApiConfig
 ```
 
@@ -177,7 +180,8 @@ jungkathon3team.aftergrow
 
 아직 없는 것:
 
-- **회복 가이드(recovery)** 도메인만 미착수(패키지 자체가 없음). 심박수·프로필 API는 구현 완료.
+- **러닝 세션 조회 API가 없습니다.** `running_sessions.route_path`(GPS 트랙)에 저장은 되는데 읽는 엔드포인트가 없어, History 화면이 경로를 그리려면 조회 API를 먼저 만들어야 합니다.
+- **주간 "거리" 목표를 저장할 곳이 없습니다.** `weeklyRunGoal`은 횟수 전용으로 확정됐습니다. `USER_GOALS`에 `weeklyDistanceGoalKm`를 신설할지 UI를 없앨지 팀 결정 대기 중입니다.
 - `RedisConfig` — `StringRedisTemplate` 자동 구성으로 충분해 아직 불필요합니다.
 - **러닝 진행 상태의 Redis 저장** — 원래 설계는 `/live`를 Redis로 받는 것이었지만, 현재 구현은 Postgres의 `running_sessions` 행을 직접 갱신합니다(아래 참고).
 
@@ -186,6 +190,11 @@ jungkathon3team.aftergrow
 - `GET /running-sessions/{id}/live`는 **GET인데 쓰기를 합니다.** 명세에 진행 중 갱신용 엔드포인트가 따로 없어, 쿼리 파라미터로 딸려온 `distanceKm`/`intensity`를 `updateLiveSnapshot()`으로 반영하는 upsert-on-read 방식입니다(`@Transactional` 붙어 있음). 갱신은 `IN_PROGRESS`일 때만 일어납니다.
 - `POST /running-sessions/{id}/end`는 **멱등**입니다. 이미 끝난 세션에 다시 호출하면 에러 대신 현재 상태를 그대로 돌려줍니다(명세에 전용 에러 코드가 없어서 내린 결정). 진행 중 세션이 있는데 새로 시작하면 `E4090`.
 - `running/external/`의 `MockUvIndexClient`·`MockLocationLabelResolver`는 **인터페이스 뒤에 있는 임시 구현**입니다. 실제 API(기상청/Open-Meteo, 카카오 로컬)를 붙일 때 새 `@Component`를 만들고 목의 `@Component`를 제거하세요. UV 지수 → 라벨("낮음"…"위험") 변환은 `UvIndexClient.UvIndexResult.of()` 한 곳에만 두고 재구현하지 마세요 — 홈 주간 요약도 이걸 씁니다.
+- **`running/external/UvIndexClient`(그 순간의 단일 UV)와 `weather/external/UvForecastClient`(하루치 배열)는 다른 것입니다.** 전자는 러닝 준비/진행 화면용이고 아직 목 구현이며, 후자가 기상청 실연동입니다. 전자를 실연동으로 바꿀 때는 후자의 `KmaUvForecastClient`에서 배열을 받아 현재 시각 값을 고르는 편이 외부 호출을 아낍니다(캐시를 공유하게 되므로).
+- **UV 예보 엔드포인트는 `LivingWthrIdxServiceV5/getUVIdxV5`입니다. 포털에 표시된 버전("생활기상지수 조회서비스(4.0)")과 서비스명의 V5는 다른 번호입니다** — 포털 표시 버전을 경로에 넣으면 `NO_OPENAPI_SERVICE_ERROR`가 납니다. 이 오류는 "경로 없음"과 "활용신청 안 됨"을 구분하지 않아(존재하지 않는 가짜 서비스도 같은 코드) 원인을 헷갈리게 만듭니다.
+- **인증키는 `URI` 객체로 직접 넘겨야 합니다.** `restClient.uri(uriBuilder -> ... .build(false))`는 인코딩을 끄지 않습니다 — `UriBuilder`에 `build(boolean)` 오버로드가 없어 `false`가 URI 변수로 해석되고, 키의 `%2B`가 `%252B`로 이중 인코딩돼 403 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`가 납니다. 인코딩/디코딩 키 두 벌 중 어느 쪽을 넣어도 되게 `%` 포함 여부로 갈라 처리합니다(`URLDecoder`로 정규화하면 디코딩 키의 `+`가 공백이 돼 망가집니다).
+- **UV 예보 키는 공공데이터포털(data.go.kr)에서 받아야 합니다. 기상청 API허브(apihub.kma.go.kr) 키로는 안 됩니다.** 두 포털은 별개로 가입·발급하며 키가 호환되지 않고, 무엇보다 **API허브에는 자외선 '예보'가 없습니다** (`LivingWthrIdxService*`는 전부 404, 있는 건 `typ01/url/kma_sfctm_uv.php` 지점 실측 관측뿐이라 미래 시간대를 못 줍니다). API허브 경로를 확인할 땐 404=경로 틀림, 403=경로는 맞고 활용신청 필요로 구분하면 됩니다.
+- **기상청 자외선지수 API는 격자좌표(nx/ny)가 아니라 행정구역코드(`areaNo`)를 받습니다.** 격자좌표를 쓰는 건 초단기·단기예보이고 거기엔 UV 항목이 없습니다. LCC 투영 변환 코드를 찾지 마세요 — 없는 게 맞고, `weather/external/AreaCodeResolver`가 `kma-area-codes.csv`(기상청 동네예보 구역코드 배포 엑셀에서 뽑은 **시군구 248개**) 중 최근접 지점을 고릅니다. **시도 단위 코드를 손으로 적지 마세요** — 강원·전북은 특별자치도 전환으로 시도 단위 코드가 기상청 파일에 아예 없어, 추측한 `5100000000`/`5200000000`으로는 조회에 실패합니다.
 - `HomeService`의 주 단위는 **월요일 시작**(`TemporalAdjusters.previousOrSame(MONDAY)`)이고, "완료"는 `ENDED` + `COMPLETED` 둘 다입니다(`COMPLETED_STATUSES`). 새 집계를 추가할 땐 이 상수를 재사용하세요.
 - 홈 집계 쿼리는 `HomeService`가 아니라 리포지토리의 `@Query`(`sumDistanceKmBetween`, `avgBpmBetween`, `avgUvIndexBetween`)에 있습니다. **합계는 `coalesce(...,0)`로 0을, 평균은 null을 반환**하는 게 의도된 구분입니다(측정 없음 = null로 응답).
 
