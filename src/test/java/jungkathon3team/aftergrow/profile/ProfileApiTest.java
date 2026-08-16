@@ -58,7 +58,8 @@ class ProfileApiTest {
                 .andExpect(jsonPath("$.data.nickname").value("김러너"))
                 .andExpect(jsonPath("$.data.goal.goalType").doesNotExist())
                 .andExpect(jsonPath("$.data.goal.weeklyRunGoal").doesNotExist())
-                .andExpect(jsonPath("$.data.integrations.locationLinked").value(false))
+                // locationLinked는 켜는 경로가 없어 응답에서 제거됐다
+                .andExpect(jsonPath("$.data.integrations.locationLinked").doesNotExist())
                 .andExpect(jsonPath("$.data.integrations.appleHealthLinked").value(false))
                 .andExpect(jsonPath("$.data.notifications.weeklyReportDay").doesNotExist());
     }
@@ -126,7 +127,7 @@ class ProfileApiTest {
     void 연동상태는_행이_없으면_전부_false를_반환한다() throws Exception {
         mockMvc.perform(get("/users/me/integrations").header("Authorization", bearer))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.locationLinked").value(false))
+                .andExpect(jsonPath("$.data.locationLinked").doesNotExist())
                 .andExpect(jsonPath("$.data.cameraPermission").value(false))
                 .andExpect(jsonPath("$.data.locationPermission").value(false))
                 .andExpect(jsonPath("$.data.appleHealthLinked").value(false));

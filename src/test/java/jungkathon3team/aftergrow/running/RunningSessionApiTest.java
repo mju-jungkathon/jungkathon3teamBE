@@ -8,6 +8,9 @@ import jungkathon3team.aftergrow.running.entity.Intensity;
 import jungkathon3team.aftergrow.running.entity.RoutePoint;
 import jungkathon3team.aftergrow.running.entity.RunningSession;
 import jungkathon3team.aftergrow.running.repository.RunningSessionRepository;
+import jungkathon3team.aftergrow.running.repository.StretchingSessionRepository;
+import jungkathon3team.aftergrow.running.entity.StretchingType;
+import jungkathon3team.aftergrow.running.entity.StretchingSession;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,6 +49,9 @@ class RunningSessionApiTest {
 
     @Autowired
     private RunningSessionRepository runningSessionRepository;
+
+    @Autowired
+    private StretchingSessionRepository stretchingSessionRepository;
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
@@ -318,6 +324,91 @@ class RunningSessionApiTest {
                         .header("Authorization", bearer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.routePath").doesNotExist());
+    }
+
+    /**
+     * 스트레칭 세션은 러닝 세션과 FK로 연결돼 있지 않아 시각 근접도로 묶는다.
+     * 이 테스트가 그 추정 규칙을 고정한다.
+     */
+    @Test
+    void 러닝_직전_스트레칭이_상세에_함께_내려간다() throws Exception {
+        LocalDateTime runStartedAt = LocalDateTime.now().minusMinutes(40);
+        stretchingSessionRepository.save(StretchingSession.builder()
+                .user(user)
+                .type(StretchingType.PRE_RUN)
+                .startedAt(runStartedAt.minusMinutes(5))
+                .build());
+
+        RunningSession session = ended(user, runStartedAt, 3.0, 1200);
+
+        mockMvc.perform(get("/running-sessions/{id}", session.getRunningSessionId())
+                        .header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.preRunStretching.type").value("PRE_RUN"))
+                .andExpect(jsonPath("$.data.preRunStretching.startedAt").exists());
+    }
+
+    @Test
+    void 스트레칭을_안_했으면_preRunStretching은_null이다() throws Exception {
+        RunningSession session = ended(user, LocalDateTime.now().minusMinutes(40), 3.0, 1200);
+
+        mockMvc.perform(get("/running-sessions/{id}", session.getRunningSessionId())
+                        .header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.preRunStretching").doesNotExist());
+    }
+
+    /** 한참 전 스트레칭이 엉뚱한 러닝에 붙으면 안 된다. */
+    @Test
+    void 시간_범위를_벗어난_스트레칭은_붙지_않는다() throws Exception {
+        LocalDateTime runStartedAt = LocalDateTime.now().minusMinutes(40);
+        stretchingSessionRepository.save(StretchingSession.builder()
+                .user(user)
+                .type(StretchingType.PRE_RUN)
+                .startedAt(runStartedAt.minusHours(3))
+                .build());
+
+        RunningSession session = ended(user, runStartedAt, 3.0, 1200);
+
+        mockMvc.perform(get("/running-sessions/{id}", session.getRunningSessionId())
+                        .header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.preRunStretching").doesNotExist());
+    }
+
+    /** 러닝이 시작된 "뒤"에 한 스트레칭(쿨다운 등)은 pre-run이 아니다. */
+    @Test
+    void 러닝_시작_이후의_스트레칭은_붙지_않는다() throws Exception {
+        LocalDateTime runStartedAt = LocalDateTime.now().minusMinutes(40);
+        stretchingSessionRepository.save(StretchingSession.builder()
+                .user(user)
+                .type(StretchingType.PRE_RUN)
+                .startedAt(runStartedAt.plusMinutes(10))
+                .build());
+
+        RunningSession session = ended(user, runStartedAt, 3.0, 1200);
+
+        mockMvc.perform(get("/running-sessions/{id}", session.getRunningSessionId())
+                        .header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.preRunStretching").doesNotExist());
+    }
+
+    @Test
+    void 남의_스트레칭은_내_러닝에_붙지_않는다() throws Exception {
+        LocalDateTime runStartedAt = LocalDateTime.now().minusMinutes(40);
+        stretchingSessionRepository.save(StretchingSession.builder()
+                .user(saveUser("other"))
+                .type(StretchingType.PRE_RUN)
+                .startedAt(runStartedAt.minusMinutes(5))
+                .build());
+
+        RunningSession session = ended(user, runStartedAt, 3.0, 1200);
+
+        mockMvc.perform(get("/running-sessions/{id}", session.getRunningSessionId())
+                        .header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.preRunStretching").doesNotExist());
     }
 
     @Test

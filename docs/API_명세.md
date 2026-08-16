@@ -474,7 +474,8 @@
   "status": "ENDED", "uvIndexAtStart": 5,
   "startLocation": { "lat": 37.5440, "lng": 127.0557 },
   "routePath": [ { "lat": 37.5440, "lng": 127.0557, "t": 0 } ],
-  "heartRate": { "heartRateSource": "RPPG", "avgBpm": 146, "maxBpm": 171, "hrvMs": 42, "measuredAt": "…" }
+  "heartRate": { "heartRateSource": "RPPG", "avgBpm": 146, "maxBpm": 171, "hrvMs": 42, "measuredAt": "…" },
+  "preRunStretching": { "type": "PRE_RUN", "startedAt": "…" }
 }
 ```
 
@@ -482,6 +483,10 @@
 - `startLocation`은 경로가 없어도 지도 중심을 잡을 수 있게 따로 내려갑니다.
 - `heartRate`는 측정이 없으면 `null`.
 - **지도 렌더링은 전적으로 클라이언트 몫입니다.** 서버는 좌표 배열만 돌려주며 카카오맵 API를 호출하지 않습니다.
+- `preRunStretching`은 이 러닝 직전에 한 스트레칭입니다. 안 했으면 `null`.
+  > ⚠️ **추정값입니다.** 스트레칭 세션은 러닝 세션과 FK로 연결돼 있지 않아(화면 흐름상 러닝보다 먼저
+  > 만들어집니다) **러닝 시작 직전 60분 이내**에 시작한 것 중 가장 최근 하나를 고릅니다.
+  > 짧은 간격으로 러닝을 두 번 하면 같은 스트레칭이 두 러닝에 붙을 수 있습니다.
 
 ```js
 const { data } = await api.get(`/running-sessions/${id}`);
@@ -763,7 +768,6 @@ new kakao.maps.Polyline({
   "nickname": "김러너",
   "goal": { "goalType": "FITNESS", "weeklyRunGoal": 5 },
   "integrations": {
-    "locationLinked": true,
     "cameraPermission": true,
     "locationPermission": true,
     "appleHealthLinked": true
@@ -814,8 +818,12 @@ new kakao.maps.Polyline({
 **Response 200**
 
 ```json
-{ "locationLinked": true, "cameraPermission": true, "locationPermission": true, "appleHealthLinked": true }
+{ "cameraPermission": true, "locationPermission": true, "appleHealthLinked": true }
 ```
+
+> **`locationLinked`는 응답에서 제거됐습니다.** 값을 `true`로 만드는 경로가 어디에도 없어 항상
+> `false`만 내려갔고, 의미상으로도 `locationPermission`(브라우저 위치 권한)과 구분되지 않았습니다.
+> DB 컬럼은 남아 있으니 "위치 연동"이 권한과 다른 개념으로 정의되면 되살릴 수 있습니다.
 
 ### 7.4 알림 설정 변경
 
@@ -846,7 +854,7 @@ new kakao.maps.Polyline({
 **Response 200** — 7.3과 같은 형태
 
 ```json
-{ "locationLinked": false, "cameraPermission": true, "locationPermission": false, "appleHealthLinked": false }
+{ "cameraPermission": true, "locationPermission": false, "appleHealthLinked": false }
 ```
 
 - `appleHealthLinked`는 여기서 바꿀 수 없습니다 — §4.3 `POST /integrations/apple-health/link`가 담당합니다.
@@ -985,4 +993,4 @@ new kakao.maps.Polyline({
 | RunningSession | startedAt, endedAt, distanceKm, intensity, uvIndexAtStart, status, routePath |
 | HeartRateMeasurement | heartRateSource(WATCH/RPPG), avgBpm, maxBpm, hrvMs, syncStatus, runningSessionId |
 | RecoveryGuide | measuredBpm, summaryMessage, actions[], cooldownTimerSec |
-| IntegrationStatus | locationLinked, cameraPermission, locationPermission, appleHealthLinked |
+| IntegrationStatus | cameraPermission, locationPermission, appleHealthLinked (locationLinked 컬럼은 미사용) |

@@ -33,6 +33,14 @@ public class RunningSessionService {
 
     private static final int GOOD_TIME_UV_THRESHOLD = 7;
 
+    /**
+     * "이 러닝 직전의 스트레칭"으로 인정하는 시간 범위.
+     * <p>화면 흐름상 스트레칭 직후 바로 러닝을 시작하므로 넉넉히 잡아도 오탐이 적다.
+     * ponytail: 시각 근접 추정이다. 정확히 묶어야 하면 stretching_sessions에 running_session_id를
+     * 추가하고 러닝 시작 시 연결하는 편이 맞다(스키마 변경 필요).
+     */
+    private static final Duration PRE_RUN_STRETCHING_WINDOW = Duration.ofMinutes(60);
+
     private final RunningSessionRepository runningSessionRepository;
     private final StretchingSessionRepository stretchingSessionRepository;
     private final UserRepository userRepository;
@@ -172,7 +180,19 @@ public class RunningSessionService {
         RunningSession session = getOwnedSession(userId, sessionId);
         return RunningSessionDetailResponse.of(
                 session,
-                heartRateMeasurementService.latestSuccessfulMeasurement(sessionId).orElse(null));
+                heartRateMeasurementService.latestSuccessfulMeasurement(sessionId).orElse(null),
+                preRunStretchingOf(userId, session.getStartedAt()));
+    }
+
+    /**
+     * 이 러닝 직전에 한 스트레칭을 찾는다.
+     * <p>스트레칭 세션에는 러닝 세션 FK가 없어(화면 흐름상 러닝보다 먼저 만들어진다) 시각 근접도로 고른다.
+     */
+    private StretchingSession preRunStretchingOf(UUID userId, LocalDateTime runStartedAt) {
+        return stretchingSessionRepository
+                .findTopByUser_UserIdAndStartedAtBetweenOrderByStartedAtDesc(
+                        userId, runStartedAt.minus(PRE_RUN_STRETCHING_WINDOW), runStartedAt)
+                .orElse(null);
     }
 
     private RunningSession getOwnedSession(UUID userId, UUID sessionId) {

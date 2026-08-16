@@ -29,16 +29,16 @@ public record ProfileResponse(
         }
     }
 
+    /** {@code locationLinked}가 없는 이유는 {@link IntegrationResponse} 참고. */
     public record Integrations(
-            boolean locationLinked,
             boolean cameraPermission,
             boolean locationPermission,
             boolean appleHealthLinked
     ) {
         public static Integrations from(IntegrationStatus s) {
             return s == null
-                    ? new Integrations(false, false, false, false)
-                    : new Integrations(s.isLocationLinked(), s.isCameraPermission(),
+                    ? new Integrations(false, false, false)
+                    : new Integrations(s.isCameraPermission(),
                     s.isLocationPermission(), s.isAppleHealthLinked());
         }
     }

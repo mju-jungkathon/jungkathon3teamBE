@@ -21,7 +21,7 @@ docker compose up -d          # PostgreSQL + Redis (실행 필수, 아래 참고
 
 **`test`/`build`는 Docker 컨테이너가 떠 있어야 통과합니다.** `contextLoads()`가 `@SpringBootTest`로 실제 PostgreSQL에 붙기 때문에 컨테이너 없이 돌리면 HibernateException으로 실패합니다. 빌드 실패 시 가장 먼저 `docker compose ps`로 postgres/redis가 healthy인지 확인하세요.
 
-테스트는 26개 클래스 216개 `@Test` 메서드이고, `running`(`RunningSessionApiTest`)·`home`(`HomeDashboardTest`)·`heartrate`(`HeartRateControllerTest`)·`profile`(`ProfileApiTest`)을 포함해 모든 도메인에 통합 테스트가 있습니다. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
+테스트는 26개 클래스 221개 `@Test` 메서드이고, `running`(`RunningSessionApiTest`)·`home`(`HomeDashboardTest`)·`heartrate`(`HeartRateControllerTest`)·`profile`(`ProfileApiTest`)을 포함해 모든 도메인에 통합 테스트가 있습니다. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
 
 CI 환경을 로컬에서 재현하려면 (프로파일별로 설정이 달라 한쪽만 통과하는 일이 생깁니다):
 
@@ -181,8 +181,6 @@ jungkathon3team.aftergrow
 아직 없는 것:
 
 - **회원 탈퇴(`DELETE /users/me`)는 DB `ON DELETE CASCADE`에 기댑니다.** 자바 쪽에서 자식 행을 지우는 코드가 없으니 찾지 마세요. 새 테이블을 만들 때 `users`를 참조한다면 반드시 `ON DELETE CASCADE`를 붙여야 탈퇴가 FK 위반으로 실패하지 않습니다. `WithdrawControllerTest`는 **`@Transactional`을 쓰지 않습니다** — 롤백되면 CASCADE가 실제로 동작했는지 확인할 수 없기 때문이고, 대신 테스트가 직접 정리합니다.
-- **`integration_status.location_linked`를 켜는 곳이 없습니다.** `PATCH /users/me/integrations`는 camera/location `permission`만, `apple-health/link`는 `appleHealthLinked`만 건드려서 이 컬럼은 항상 false로만 응답합니다. 명세에도 켜는 수단이 없습니다.
-- **스트레칭 세션은 write-only입니다.** `POST /stretching-sessions`로 행은 쌓이는데 조회 API도 홈 집계 반영도 없습니다.
 - **주간 "거리" 목표를 저장할 곳이 없습니다.** `weeklyRunGoal`은 횟수 전용으로 확정됐습니다. `USER_GOALS`에 `weeklyDistanceGoalKm`를 신설할지 UI를 없앨지 팀 결정 대기 중입니다.
 - `RedisConfig` — `StringRedisTemplate` 자동 구성으로 충분해 아직 불필요합니다.
 - **러닝 진행 상태의 Redis 저장** — 원래 설계는 `/live`를 Redis로 받는 것이었지만, 현재 구현은 Postgres의 `running_sessions` 행을 직접 갱신합니다(아래 참고).
@@ -190,6 +188,8 @@ jungkathon3team.aftergrow
 ### 러닝 / 홈 도메인에서 알아야 할 것
 
 - `GET /running-sessions/{id}/live`는 **GET인데 쓰기를 합니다.** 명세에 진행 중 갱신용 엔드포인트가 따로 없어, 쿼리 파라미터로 딸려온 `distanceKm`/`intensity`를 `updateLiveSnapshot()`으로 반영하는 upsert-on-read 방식입니다(`@Transactional` 붙어 있음). 갱신은 `IN_PROGRESS`일 때만 일어납니다.
+- **`integration_status.location_linked`는 아무도 읽지도 쓰지도 않습니다.** true로 만드는 경로가 없어 항상 false였고 `locationPermission`과 구분되지 않아 **API 응답에서 뺐습니다**(컬럼과 엔티티 필드는 남아 있습니다). "위치 연동"이 권한과 다른 개념으로 정의되면 그때 되살리세요.
+- **스트레칭 세션은 러닝 세션과 FK로 연결돼 있지 않습니다.** 화면 흐름상 러닝보다 먼저 만들어지기 때문입니다. `GET /running-sessions/{id}`의 `preRunStretching`은 **러닝 시작 직전 60분 이내**라는 시각 근접도로 고른 추정값입니다(`RunningSessionService.PRE_RUN_STRETCHING_WINDOW`). 정확히 묶어야 하면 `stretching_sessions`에 `running_session_id`를 추가하고 러닝 시작 시 연결해야 합니다.
 - **`GET /running-sessions/{id}`가 `GET /running-sessions/prepare`와 같은 자리를 다툽니다.** `{id}`를 `UUID`로 받아 "prepare"가 바인딩되지 않으므로 현재는 안전하지만, `String`으로 바꾸면 준비 화면이 통째로 깨집니다. `RunningSessionApiTest`가 이걸 고정하고 있습니다.
 - **러닝 기록 목록에는 `routePath`를 싣지 마세요.** 세션당 수백 점이라 목록 응답이 수백 KB가 됩니다. 목록은 `hasRoutePath` 불리언만 주고, 좌표는 상세에서만 내려갑니다.
 - `POST /running-sessions/{id}/end`는 **멱등**입니다. 이미 끝난 세션에 다시 호출하면 에러 대신 현재 상태를 그대로 돌려줍니다(명세에 전용 에러 코드가 없어서 내린 결정). 진행 중 세션이 있는데 새로 시작하면 `E4090`.
