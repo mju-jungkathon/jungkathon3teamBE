@@ -6,6 +6,7 @@ import jungkathon3team.aftergrow.weather.external.UvForecastClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.client.RequestMatcher;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.ObjectMapper;
 
@@ -38,11 +39,56 @@ class KmaUvForecastClientTest {
             """;
 
     private UvForecastClient clientReturning(String body) {
+        return clientReturning(body, "test-key", anything());
+    }
+
+    private UvForecastClient clientReturning(String body, String authKey, RequestMatcher matcher) {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer.bindTo(builder).build()
-                .expect(anything())
+                .expect(matcher)
                 .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
-        return new KmaUvForecastClient(builder, new ObjectMapper(), "test-key");
+        return new KmaUvForecastClient(builder, new ObjectMapper(), authKey);
+    }
+
+    /**
+     * 인증키가 이중 인코딩되면 게이트웨이가 SERVICE_KEY_IS_NOT_REGISTERED_ERROR(403)를 준다.
+     * uri(uriBuilder -> ...) 람다는 {@code build(false)}가 "인코딩 안 함"으로 동작하지 않아
+     * 조용히 %2B를 %252B로 만든다 — 실제로 한 번 당했으므로 URI를 여기서 고정한다.
+     */
+    @Test
+    void 인증키를_이중_인코딩하지_않는다() {
+        // 인코딩 키(%2B 포함)를 넣어도 전송되는 건 %2B여야 한다(%252B가 아니라).
+        UvForecastClient client = clientReturning(MORNING_RESPONSE, "abc%2Bdef%3D",
+                request -> {
+                    String uri = request.getURI().toString();
+                    assertThat(uri).contains("serviceKey=abc%2Bdef%3D");
+                    assertThat(uri).doesNotContain("%252B");
+                });
+
+        client.fetchDailyForecast("1100000000", DATE);
+    }
+
+    /** 디코딩 키(+, = 원문)를 넣어도 전송 시엔 인코딩돼야 한다. */
+    @Test
+    void 디코딩_키를_넣어도_인코딩해서_보낸다() {
+        UvForecastClient client = clientReturning(MORNING_RESPONSE, "abc+def=",
+                request -> {
+                    String uri = request.getURI().toString();
+                    assertThat(uri).contains("serviceKey=abc%2Bdef%3D");
+                });
+
+        client.fetchDailyForecast("1100000000", DATE);
+    }
+
+    @Test
+    void 요청_URI는_V5_엔드포인트를_가리킨다() {
+        UvForecastClient client = clientReturning(MORNING_RESPONSE, "k",
+                request -> assertThat(request.getURI().toString())
+                        .startsWith("https://apis.data.go.kr/1360000/LivingWthrIdxServiceV5/getUVIdxV5")
+                        .contains("areaNo=1100000000")
+                        .contains("time=2026081606"));
+
+        client.fetchDailyForecast("1100000000", DATE);
     }
 
     private Map<String, Integer> asMap(List<UvForecastClient.HourlyUv> hourly) {

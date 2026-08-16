@@ -7,6 +7,9 @@ import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -14,7 +17,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 기상청 생활기상지수 자외선지수 API({@code LivingWthrIdxServiceV4/getUVIdxV4}) 연동.
+ * 기상청 생활기상지수 자외선지수 API({@code LivingWthrIdxServiceV5/getUVIdxV5}) 연동.
+ *
+ * <p><b>서비스명의 V5와 포털의 "4.0"은 다른 번호다.</b> 공공데이터포털에 "생활기상지수 조회서비스(4.0)"으로
+ * 올라와 있지만 활용가이드가 명시하는 엔드포인트는 {@code LivingWthrIdxServiceV5/getUVIdxV5}다.
+ * 포털 표시 버전을 그대로 경로에 넣으면 {@code NO_OPENAPI_SERVICE_ERROR}가 난다.
  *
  * <p><b>공공데이터포털(apis.data.go.kr)을 쓴다. 기상청 API허브(apihub.kma.go.kr)로는 안 된다.</b>
  * API허브에도 기상청 API가 여럿 미러링돼 있지만 <b>자외선 예보는 없다</b> —
@@ -41,6 +48,8 @@ import java.util.List;
 @Slf4j
 public class KmaUvForecastClient implements UvForecastClient {
 
+    private static final String ENDPOINT =
+            "https://apis.data.go.kr/1360000/LivingWthrIdxServiceV5/getUVIdxV5";
     private static final DateTimeFormatter ANNOUNCED_AT = DateTimeFormatter.ofPattern("yyyyMMddHH");
     private static final String RESULT_CODE_OK = "00";
 
@@ -79,23 +88,39 @@ public class KmaUvForecastClient implements UvForecastClient {
         return date.minusDays(1).atTime(ANNOUNCE_HOURS[1], 0);
     }
 
+    /**
+     * 요청 URI를 문자열로 직접 조립한다.
+     *
+     * <p><b>{@code uri(uriBuilder -> ...)} 람다를 쓰면 안 된다.</b> {@code UriBuilder}에는
+     * {@code build(boolean)} 오버로드가 없어서 {@code build(false)}가 "인코딩 안 함"이 아니라
+     * {@code build(Object... uriVariables)}에 값 하나를 넘기는 호출로 해석된다. 그러면 팩토리 기본
+     * 인코딩(TEMPLATE_AND_VALUES)이 그대로 적용돼 인증키의 {@code %2B}가 {@code %252B}로
+     * <b>이중 인코딩</b>되고, 게이트웨이는 SERVICE_KEY_IS_NOT_REGISTERED_ERROR(403)를 돌려준다.
+     * {@code URI} 객체를 직접 넘기면 RestClient가 UriBuilderFactory를 아예 거치지 않는다.
+     *
+     * <p>공공데이터포털은 인증키를 인코딩/디코딩 두 벌로 발급한다. 어느 쪽을 넣어도 되도록 형태를 보고 고른다:
+     * 디코딩 키는 base64라 {@code + / =}만 들어 있고 {@code %}가 없으며, 인코딩 키는 그것들이
+     * {@code %2B %2F %3D}로 바뀐 것이라 반드시 {@code %}가 있다.
+     *
+     * <p>여기서 {@code URLDecoder}로 정규화하지 않는 이유: 디코딩 키에 든 <b>{@code +}를 공백으로</b>
+     * 바꿔버려 키가 망가진다(x-www-form-urlencoded 규칙). 되돌릴 수 없는 손실이다.
+     */
+    private URI buildUri(String areaNo, LocalDateTime announcedAt) {
+        String normalizedKey = authKey.contains("%")
+                ? authKey                                                    // 인코딩 키 — 그대로 보낸다
+                : URLEncoder.encode(authKey, StandardCharsets.UTF_8);        // 디코딩 키 — 지금 인코딩한다
+        return URI.create(ENDPOINT
+                + "?serviceKey=" + normalizedKey
+                + "&areaNo=" + areaNo
+                + "&time=" + announcedAt.format(ANNOUNCED_AT)
+                + "&dataType=JSON&numOfRows=10&pageNo=1");
+    }
+
     private JsonNode requestItem(String areaNo, LocalDateTime announcedAt) {
         String body;
         try {
             body = restClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            // 인증키에 +/= 같은 문자가 들어갈 수 있고 이미 인코딩된 형태로 발급되기도 한다.
-                            // build(false)로 재인코딩을 막아 발급받은 문자열이 그대로 전달되게 한다
-                            // (재인코딩하면 %2B가 %252B가 되어 인증 실패한다).
-                            .scheme("https").host("apis.data.go.kr")
-                            .path("/1360000/LivingWthrIdxServiceV4/getUVIdxV4")
-                            .queryParam("serviceKey", authKey)
-                            .queryParam("areaNo", areaNo)
-                            .queryParam("time", announcedAt.format(ANNOUNCED_AT))
-                            .queryParam("dataType", "JSON")
-                            .queryParam("numOfRows", 10)
-                            .queryParam("pageNo", 1)
-                            .build(false))
+                    .uri(buildUri(areaNo, announcedAt))
                     .retrieve()
                     .body(String.class);
         } catch (Exception e) {

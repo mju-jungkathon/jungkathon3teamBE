@@ -107,18 +107,37 @@ class UvForecastApiTest {
         assertThat(redisTemplate.hasKey(cacheKey)).isTrue();
     }
 
-    /** 캐시 키에 사용자 정보가 들어가지 않아, 같은 시도 사용자끼리 캐시를 공유해야 한다. */
+    /** 캐시 키에 사용자 정보가 들어가지 않아, 가까운 사용자끼리 캐시를 공유해야 한다. */
     @Test
-    void 같은_시도의_다른_좌표는_같은_캐시를_쓴다() {
-        String seoulCityHall = areaCodeResolver.resolve(SEOUL_LAT, SEOUL_LNG);
-        String seoulGangnam = areaCodeResolver.resolve(37.4979, 127.0276);
-        assertThat(seoulGangnam).isEqualTo(seoulCityHall);
+    void 같은_구_안의_다른_좌표는_같은_캐시를_쓴다() {
+        String cityHall = areaCodeResolver.resolve(SEOUL_LAT, SEOUL_LNG);
+        String nearby = areaCodeResolver.resolve(SEOUL_LAT + 0.002, SEOUL_LNG + 0.002);
+        assertThat(nearby).isEqualTo(cityHall);
     }
 
     @Test
     void 먼_지역은_다른_행정구역코드로_떨어진다() {
         assertThat(areaCodeResolver.resolve(33.4996, 126.5312))   // 제주
                 .isNotEqualTo(areaCodeResolver.resolve(SEOUL_LAT, SEOUL_LNG));
+    }
+
+    /**
+     * 강원·전북은 특별자치도 전환으로 <b>시도 단위 코드가 기상청 구역 파일에 없다.</b>
+     * 추측한 코드(5100000000 등)를 쓰면 조회가 실패하므로, 시군구 코드가 나오는지 고정한다.
+     * 아래 값은 실제 API 호출로 NORMAL_SERVICE를 확인한 코드다.
+     */
+    @Test
+    void 강원과_전북도_실재하는_시군구_코드로_해석된다() {
+        assertThat(areaCodeResolver.resolve(37.8813, 127.7300)).isEqualTo("5111000000");   // 춘천시
+        assertThat(areaCodeResolver.resolve(35.8091, 127.1480)).isEqualTo("5211300000");   // 전주시 덕진구
+    }
+
+    /** 표가 비어 있거나 파싱이 깨지면 전부 같은 코드로 몰릴 수 있어, 대표 지점 몇 개를 고정한다. */
+    @Test
+    void 대표_좌표가_기대한_행정구역코드로_해석된다() {
+        assertThat(areaCodeResolver.resolve(37.4979, 127.0276)).isEqualTo("1165000000");   // 서울 서초구
+        assertThat(areaCodeResolver.resolve(35.1796, 129.0756)).startsWith("26");          // 부산
+        assertThat(areaCodeResolver.resolve(33.4996, 126.5312)).startsWith("50");          // 제주
     }
 
     @Test

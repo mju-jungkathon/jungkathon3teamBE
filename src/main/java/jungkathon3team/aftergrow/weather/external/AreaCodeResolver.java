@@ -1,6 +1,16 @@
 package jungkathon3team.aftergrow.weather.external;
 
+import jakarta.annotation.PostConstruct;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 위경도 → 기상청 행정구역코드({@code areaNo}) 변환.
@@ -9,53 +19,60 @@ import org.springframework.stereotype.Component;
  * 격자좌표를 쓰는 건 초단기·단기예보이고 거기엔 UV 항목이 없다. 그래서 LCC 투영 변환이 아니라
  * 행정구역 매핑이 필요하다.
  *
- * <p>17개 광역시·도의 대표 지점 중 <b>가장 가까운 곳</b>을 고른다. 경계 다각형이 아니라 최근접점이라
- * 도 경계 근처에서는 옆 시도로 떨어질 수 있지만, UV 지수는 수십 km 단위로 거의 균일해서 실용상 문제없다.
- * 오히려 같은 시도 사용자가 캐시를 널리 공유하게 되는 이점이 있다.
+ * <p>표는 {@code kma-area-codes.csv}에 있고, 기상청이 배포하는 동네예보 구역코드 엑셀에서
+ * <b>시군구 단위 248개</b>를 뽑은 것이다. 손으로 적은 값이 아니라 기상청 파일에서 유래했으므로
+ * 코드가 실재함이 보장된다 — 특히 강원·전북은 특별자치도 전환으로 시도 단위 코드가
+ * 그 파일에 없어서, 추측한 코드를 쓰면 조회가 실패한다.
+ *
+ * <p>구역 경계 다각형이 아니라 <b>대표 지점 최근접</b>으로 고른다. 경계 근처에서는 옆 시군구로
+ * 떨어질 수 있지만 UV 지수는 수십 km 단위로 거의 균일해 실용상 문제없고, 같은 시군구 사용자가
+ * 캐시를 공유하게 되는 이점이 있다.
  */
+@Slf4j
 @Component
 public class AreaCodeResolver {
 
-    /**
-     * @param areaNo 기상청 행정구역코드(10자리)
-     * @param lat    시도청 소재지 기준 대표 위도
-     * @param lng    시도청 소재지 기준 대표 경도
-     */
-    private record Area(String areaNo, double lat, double lng) {
+    private static final String RESOURCE = "kma-area-codes.csv";
+
+    private record Area(String areaNo, double lat, double lng, String name) {
     }
 
-    // ponytail: 시도 단위 17개로 시작한다. 시군구 단위 정밀도가 필요해지면
-    // 기상청 지역코드 목록(공공데이터포털 첨부 엑셀)을 리소스로 넣고 이 배열만 늘리면 된다.
-    private static final Area[] AREAS = {
-            new Area("1100000000", 37.5665, 126.9780), // 서울
-            new Area("2600000000", 35.1796, 129.0756), // 부산
-            new Area("2700000000", 35.8714, 128.6014), // 대구
-            new Area("2800000000", 37.4563, 126.7052), // 인천
-            new Area("2900000000", 35.1595, 126.8526), // 광주
-            new Area("3000000000", 36.3504, 127.3845), // 대전
-            new Area("3100000000", 35.5384, 129.3114), // 울산
-            new Area("3600000000", 36.4800, 127.2890), // 세종
-            new Area("4100000000", 37.2636, 127.0286), // 경기(수원)
-            new Area("4300000000", 36.6424, 127.4890), // 충북(청주)
-            new Area("4400000000", 36.6009, 126.6650), // 충남(홍성)
-            new Area("4600000000", 34.8161, 126.4630), // 전남(무안)
-            new Area("4700000000", 36.5684, 128.7294), // 경북(안동)
-            new Area("4800000000", 35.2280, 128.6811), // 경남(창원)
-            new Area("5000000000", 33.4996, 126.5312), // 제주
-            // 강원·전북은 특별자치도 전환으로 코드가 바뀌었다(42→51, 45→52).
-            // 기상청이 아직 구 코드를 쓴다면 이 두 줄만 42/45로 되돌리면 된다.
-            new Area("5100000000", 37.8813, 127.7300), // 강원(춘천)
-            new Area("5200000000", 35.8242, 127.1480), // 전북(전주)
-    };
+    private List<Area> areas;
 
-    /** 가장 가까운 광역시·도의 행정구역코드. 한국 범위에서만 의미가 있다. */
+    @PostConstruct
+    void load() {
+        List<Area> loaded = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                new ClassPathResource(RESOURCE).getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank() || line.startsWith("#")) {
+                    continue;
+                }
+                String[] parts = line.split(",", 4);
+                loaded.add(new Area(parts[0], Double.parseDouble(parts[1]), Double.parseDouble(parts[2]),
+                        parts.length > 3 ? parts[3] : ""));
+            }
+        } catch (IOException e) {
+            // 표가 없으면 UV 예보 자체가 불가능하므로 기동 시점에 실패시킨다.
+            // 런타임에 조용히 틀린 지역을 조회하는 것보다 낫다.
+            throw new IllegalStateException(RESOURCE + " 를 읽을 수 없습니다.", e);
+        }
+        if (loaded.isEmpty()) {
+            throw new IllegalStateException(RESOURCE + " 에 유효한 행이 없습니다.");
+        }
+        this.areas = List.copyOf(loaded);
+        log.info("기상청 행정구역코드 {}건 로드", areas.size());
+    }
+
+    /** 가장 가까운 시군구의 행정구역코드. 한국 범위 좌표에서만 의미가 있다. */
     public String resolve(double lat, double lng) {
-        Area nearest = AREAS[0];
+        Area nearest = areas.get(0);
         double nearestDistance = Double.MAX_VALUE;
 
-        for (Area area : AREAS) {
+        for (Area area : areas) {
             // 실제 거리가 아니라 순위만 필요하므로 제곱합 그대로 비교한다(sqrt 불필요).
-            // 위도 1도와 경도 1도의 실제 길이가 달라 약간 왜곡되지만, 시도를 고르는 데는 충분하다.
+            // 위도 1도와 경도 1도의 실제 길이가 달라 약간 왜곡되지만, 구역을 고르는 데는 충분하다.
             double dLat = area.lat() - lat;
             double dLng = area.lng() - lng;
             double distance = dLat * dLat + dLng * dLng;
