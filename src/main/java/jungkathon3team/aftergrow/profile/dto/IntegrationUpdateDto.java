@@ -1,5 +1,7 @@
 package jungkathon3team.aftergrow.profile.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 public class IntegrationUpdateDto {
 
     /**
@@ -11,6 +13,7 @@ public class IntegrationUpdateDto {
      * <p>{@code appleHealthLinked}는 여기서 다루지 않는다 — R4.3
      * {@code POST /integrations/apple-health/link}가 담당한다.
      */
+    @Schema(name = "IntegrationUpdateRequest")
     public record Request(
             Boolean cameraPermission,
             Boolean locationPermission

@@ -1,6 +1,7 @@
 package jungkathon3team.aftergrow.running.dto;
 
 import jungkathon3team.aftergrow.running.entity.Intensity;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jungkathon3team.aftergrow.running.entity.RunningSession;
 import jungkathon3team.aftergrow.running.entity.RunningStatus;
 
@@ -20,6 +21,7 @@ public record RunningRecordsResponse(
 ) {
 
     /** {@code Record}는 {@code java.lang.Record}를 가려서 쓰지 않는다(측정 기록 DTO와 같은 이유). */
+    @Schema(name = "RunningRecordItem")
     public record Item(
             UUID runningSessionId,
             LocalDateTime startedAt,

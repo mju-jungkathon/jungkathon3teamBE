@@ -1,6 +1,7 @@
 package jungkathon3team.aftergrow.heartrate.dto;
 
 import jakarta.validation.constraints.NotNull;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Positive;
 import jungkathon3team.aftergrow.heartrate.entity.SignalQuality;
 
@@ -13,6 +14,7 @@ import java.time.LocalDateTime;
  */
 public class RppgResultDto {
 
+    @Schema(name = "RppgResultRequest")
     public record Request(
             @NotNull @Positive Integer avgBpm,
             @NotNull @Positive Integer maxBpm,
