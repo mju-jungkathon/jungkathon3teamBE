@@ -34,15 +34,34 @@ public class OpenAiRecoveryGuideAiClient implements RecoveryGuideAiClient {
     private static final int DEFAULT_COOLDOWN_SEC = 300;
 
     private static final String SYSTEM_PROMPT = """
-            너는 러닝 앱의 회복 코치야. 사용자가 방금 마친 러닝 데이터를 보고
-            1~2문장의 한국어 요약 메시지와, 회복에 도움이 되는 액션 2~3개를 제안해.
-            actions의 type은 HYDRATION, COOLDOWN_STRETCH, UV_CAUTION 중에서만 골라.
-            UV_CAUTION은 UV 지수가 높을 때만 포함하고, 그렇지 않으면 빼.
-            cooldownTimerSec은 120~600 사이 정수로, 강도가 높거나 거리가 길수록 크게 잡아.
+            너는 러닝 앱의 피부 회복 코치야. UVB는 표피를 손상시켜 색소침착을,
+            UVA는 진피의 콜라겐을 파괴해 광노화를 일으키고, 심박수가 오르면 말초혈류가
+            늘어 피부 온도가 올라 홍조·열감이 생기고, 땀을 많이 흘릴수록 피지막이 씻겨나가
+            피부 장벽이 자극에 약해진다는 걸 근거로 판단해.
+
+            사용자 메시지의 운동 데이터(강도·거리·시간·UV 노출량 등급·심박수)를 보고
+            다음 순서로 판단해:
+            1. UV 노출량 등급과 운동 강도를 함께 고려해 종합 피부 위험도를 정해.
+            2. 위험도가 높을수록 액션 개수(3~5개)와 description의 구체성(순서·시점)을 늘려.
+            3. 아래 6개 type 중에서만 골라 actions를 구성해:
+               HYDRATION(수분 보충), COOLDOWN(심박을 진정시킨 뒤 스킨케어 착수),
+               CLEANSING(세안), SOOTHING(홍조·열감 진정), UV_CARE(자외선 손상 케어),
+               MOISTURIZING(보습)
+               - HYDRATION, CLEANSING, MOISTURIZING은 항상 포함해.
+               - UV 노출량 등급이 '높음' 이상이면 UV_CARE를 반드시 포함해.
+               - 운동 강도가 높거나 장거리를 뛰었으면 COOLDOWN을 반드시 포함해.
+               - 강도는 높은데 UV 노출은 낮으면 SOOTHING을 포함해 열감을 따로 다뤄.
+                 UV_CARE에 이미 진정 내용을 담았다면 SOOTHING은 생략해도 돼.
+            4. description은 왜 필요한지와 구체적 방법·시점(예: "귀가 후 10분 이내")을
+               1~2문장으로 적어.
+            5. 의약품 추천, 질환명 언급, 진단은 하지 말고, 근거 없는 과장(예: "피부암 위험")도
+               하지 마. 특정 브랜드명도 쓰지 마.
+            6. cooldownTimerSec은 120~600 사이 정수로, 강도가 높거나 거리가 길수록 크게 잡아.
             반드시 지정된 JSON 스키마 형식으로만 응답하고 다른 설명은 붙이지 마.
             """;
 
     private static final Map<String, Object> RESPONSE_FORMAT = buildResponseFormat();
+    private static final List<Map<String, Object>> FEW_SHOT_MESSAGES = buildFewShotMessages();
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
@@ -86,12 +105,14 @@ public class OpenAiRecoveryGuideAiClient implements RecoveryGuideAiClient {
     }
 
     private AiGuidePayload requestGuide(Context ctx) {
+        List<Map<String, Object>> messages = new ArrayList<>();
+        messages.add(Map.of("role", "system", "content", SYSTEM_PROMPT));
+        messages.addAll(FEW_SHOT_MESSAGES);
+        messages.add(Map.of("role", "user", "content", userPrompt(ctx)));
+
         Map<String, Object> requestBody = Map.of(
                 "model", model,
-                "messages", List.of(
-                        Map.of("role", "system", "content", SYSTEM_PROMPT),
-                        Map.of("role", "user", "content", userPrompt(ctx))
-                ),
+                "messages", messages,
                 "response_format", RESPONSE_FORMAT,
                 "temperature", 0.7
         );
@@ -114,12 +135,16 @@ public class OpenAiRecoveryGuideAiClient implements RecoveryGuideAiClient {
         return """
                 강도: %s
                 거리: %s km
+                운동 시간: %s 분
                 시작 시점 UV 지수: %s
+                UV 노출량 등급(지수×시간 기준): %s
                 측정된 평균 심박수: %s bpm
                 """.formatted(
                 ctx.intensity() != null ? ctx.intensity() : "알수없음",
                 ctx.distanceKm() != null ? ctx.distanceKm() : "알수없음",
+                ctx.durationSec() != null ? ctx.durationSec() / 60 : "알수없음",
                 ctx.uvIndexAtStart() != null ? ctx.uvIndexAtStart() : "알수없음",
+                RecoveryGuideAiClient.uvDoseTier(ctx.uvIndexAtStart(), ctx.durationSec()).label(),
                 ctx.measuredBpm() != null ? ctx.measuredBpm() : "측정안됨"
         );
     }
@@ -167,7 +192,7 @@ public class OpenAiRecoveryGuideAiClient implements RecoveryGuideAiClient {
                 "type", "object",
                 "properties", mapOf(
                         "type", mapOf("type", "string",
-                                "enum", List.of("HYDRATION", "COOLDOWN_STRETCH", "UV_CAUTION")),
+                                "enum", List.of("HYDRATION", "COOLDOWN", "CLEANSING", "SOOTHING", "UV_CARE", "MOISTURIZING")),
                         "title", mapOf("type", "string"),
                         "description", mapOf("type", "string")
                 ),
@@ -193,6 +218,77 @@ public class OpenAiRecoveryGuideAiClient implements RecoveryGuideAiClient {
                         "strict", true,
                         "schema", guideSchema
                 )
+        );
+    }
+
+    /**
+     * few-shot 예시 3쌍. system 지시만으로는 모델이 문체·구체성을 알아서 정해 편차가 컸는데,
+     * 원하는 톤·분량의 예시를 보여주면 출력이 그쪽으로 수렴한다. 세 축을 모두 보여준다:
+     * 고UV+고강도(UV_CARE), 저UV+저강도(기본 3종), 고강도+저UV(SOOTHING) — SOOTHING은
+     * 예시가 없으면 모델이 거의 안 골라서 따로 넣었다.
+     * <p>user/assistant 메시지 쌍이라 {@link #userPrompt}와 같은 포맷을 써야 하고,
+     * assistant 쪽은 {@link #RESPONSE_FORMAT} 스키마를 그대로 만족해야 한다(강제 검증은 안 되므로 직접 맞춘다).
+     */
+    private static List<Map<String, Object>> buildFewShotMessages() {
+        String highUvUser = """
+                강도: HIGH
+                거리: 8.0 km
+                운동 시간: 55 분
+                시작 시점 UV 지수: 9
+                UV 노출량 등급(지수×시간 기준): 매우 높음
+                측정된 평균 심박수: 168 bpm
+                """;
+        String highUvAssistant = """
+                {"summaryMessage":"높은 강도로 8km를 55분간 달려 자외선 노출과 열감이 모두 컸어요. 진정 케어와 수분 보충을 서둘러 챙기세요.",\
+                "cooldownTimerSec":540,"actions":[\
+                {"type":"HYDRATION","title":"수분 보충","description":"물 600ml 이상을 15분 내로 나눠 마셔 전해질 균형을 맞춰주세요"},\
+                {"type":"COOLDOWN","title":"심박 안정화","description":"그늘에서 5~10분간 걸으며 심박수를 낮춘 뒤 스킨케어를 시작하세요"},\
+                {"type":"CLEANSING","title":"세안","description":"귀가 후 15분 이내 약산성 클렌저로 땀과 피지를 씻어내세요"},\
+                {"type":"UV_CARE","title":"자외선 진정 케어","description":"시원한 물로 홍반을 가라앉힌 뒤 자외선 차단제를 다시 발라주세요"},\
+                {"type":"MOISTURIZING","title":"보습","description":"세안 직후 무자극 수분크림으로 마무리해 손상된 장벽을 보호하세요"}]}\
+                """;
+
+        String lowLoadUser = """
+                강도: LOW
+                거리: 2.0 km
+                운동 시간: 15 분
+                시작 시점 UV 지수: 2
+                UV 노출량 등급(지수×시간 기준): 낮음
+                측정된 평균 심박수: 110 bpm
+                """;
+        String lowLoadAssistant = """
+                {"summaryMessage":"가볍게 2km를 15분간 달렸어요. 부담 없이 기본 케어만 챙기면 충분해요.",\
+                "cooldownTimerSec":180,"actions":[\
+                {"type":"HYDRATION","title":"수분 보충","description":"물 250~300ml 정도를 천천히 나눠 마셔주세요"},\
+                {"type":"CLEANSING","title":"세안","description":"미온수로 가볍게 세안해주세요"},\
+                {"type":"MOISTURIZING","title":"보습","description":"세안 후 수분 크림으로 마무리해주세요"}]}\
+                """;
+
+        String highLoadLowUvUser = """
+                강도: HIGH
+                거리: 7.0 km
+                운동 시간: 50 분
+                시작 시점 UV 지수: 2
+                UV 노출량 등급(지수×시간 기준): 낮음
+                측정된 평균 심박수: 172 bpm
+                """;
+        String highLoadLowUvAssistant = """
+                {"summaryMessage":"흐린 날씨에 7km를 50분간 고강도로 달렸어요. 자외선보다는 열감과 땀 관리가 필요해요.",\
+                "cooldownTimerSec":480,"actions":[\
+                {"type":"HYDRATION","title":"수분 보충","description":"물 500ml 이상을 20분 내로 나눠 마셔주세요"},\
+                {"type":"COOLDOWN","title":"심박 안정화","description":"실내에서 5~10분간 가볍게 걸으며 심박수를 낮춘 뒤 스킨케어를 시작하세요"},\
+                {"type":"CLEANSING","title":"세안","description":"귀가 후 30분 이내 약산성 클렌저로 땀과 피지를 씻어내세요"},\
+                {"type":"SOOTHING","title":"열감 진정","description":"붉어진 얼굴에 차가운 수건을 5분간 올려 열을 가라앉혀 주세요"},\
+                {"type":"MOISTURIZING","title":"보습","description":"세안 직후 수분 크림으로 마무리해 피부 장벽을 보호하세요"}]}\
+                """;
+
+        return List.of(
+                Map.of("role", "user", "content", highUvUser),
+                Map.of("role", "assistant", "content", highUvAssistant),
+                Map.of("role", "user", "content", lowLoadUser),
+                Map.of("role", "assistant", "content", lowLoadAssistant),
+                Map.of("role", "user", "content", highLoadLowUvUser),
+                Map.of("role", "assistant", "content", highLoadLowUvAssistant)
         );
     }
 

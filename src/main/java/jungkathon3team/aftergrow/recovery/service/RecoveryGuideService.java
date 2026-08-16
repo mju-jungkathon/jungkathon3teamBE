@@ -60,6 +60,7 @@ public class RecoveryGuideService {
                 new RecoveryGuideAiClient.Context(
                         session.getIntensity(),
                         session.getDistanceKm(),
+                        session.getDurationSec(),
                         session.getUvIndexAtStart(),
                         measuredBpm
                 ));
