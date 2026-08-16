@@ -33,6 +33,12 @@ public class IntegrationStatus {
     @Column(name = "user_id")
     private UUID userId;
 
+    /**
+     * <b>현재 아무도 읽지도 쓰지도 않는다.</b> true로 만드는 경로가 없어 항상 false였고,
+     * 의미상 {@code locationPermission}(브라우저 위치 권한)과 구분되지 않아 API 응답에서 뺐다.
+     * <p>컬럼(과 이 필드)은 남겨 둔다 — 엔티티는 테이블 전체를 매핑한다는 규약이 있고,
+     * "위치 연동"이 권한과 다른 무언가로 정의되면 그때 되살리면 되기 때문이다.
+     */
     @Column(name = "location_linked", nullable = false)
     private boolean locationLinked;
 

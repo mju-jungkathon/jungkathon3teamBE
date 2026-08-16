@@ -6,6 +6,8 @@ import jungkathon3team.aftergrow.running.entity.Intensity;
 import jungkathon3team.aftergrow.running.entity.RoutePoint;
 import jungkathon3team.aftergrow.running.entity.RunningSession;
 import jungkathon3team.aftergrow.running.entity.RunningStatus;
+import jungkathon3team.aftergrow.running.entity.StretchingType;
+import jungkathon3team.aftergrow.running.entity.StretchingSession;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -29,8 +31,25 @@ public record RunningSessionDetailResponse(
         Integer uvIndexAtStart,
         Location startLocation,
         List<RoutePoint> routePath,
-        HeartRate heartRate
+        HeartRate heartRate,
+        Stretching preRunStretching
 ) {
+
+    /**
+     * 이 러닝 직전에 한 스트레칭. 안 했으면 null.
+     *
+     * <p><b>추정값이다.</b> 스트레칭 세션은 러닝 세션과 FK로 연결돼 있지 않아(화면 흐름상 러닝보다
+     * 먼저 만들어진다) 시각 근접도로 골라낸다. 짧은 간격으로 러닝을 두 번 하면 같은 스트레칭이
+     * 두 러닝에 붙을 수 있다.
+     */
+    public record Stretching(
+            StretchingType type,
+            LocalDateTime startedAt
+    ) {
+        public static Stretching from(StretchingSession s) {
+            return new Stretching(s.getType(), s.getStartedAt());
+        }
+    }
 
     /** 러닝 시작 지점. 경로가 없어도 지도 중심을 잡을 수 있게 따로 내려준다. */
     public record Location(Double lat, Double lng) {
@@ -54,7 +73,9 @@ public record RunningSessionDetailResponse(
         }
     }
 
-    public static RunningSessionDetailResponse of(RunningSession session, HeartRateMeasurement measurement) {
+    public static RunningSessionDetailResponse of(RunningSession session,
+                                                  HeartRateMeasurement measurement,
+                                                  StretchingSession stretching) {
         return new RunningSessionDetailResponse(
                 session.getRunningSessionId(),
                 session.getStartedAt(),
@@ -66,7 +87,8 @@ public record RunningSessionDetailResponse(
                 session.getUvIndexAtStart(),
                 new Location(session.getLat(), session.getLng()),
                 session.getRoutePath(),
-                measurement == null ? null : HeartRate.from(measurement)
+                measurement == null ? null : HeartRate.from(measurement),
+                stretching == null ? null : Stretching.from(stretching)
         );
     }
 }
