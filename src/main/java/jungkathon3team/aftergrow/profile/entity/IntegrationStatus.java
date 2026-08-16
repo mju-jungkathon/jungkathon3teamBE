@@ -77,4 +77,19 @@ public class IntegrationStatus {
     public void linkAppleHealth(boolean linked) {
         this.appleHealthLinked = linked;
     }
+
+    /**
+     * 브라우저 권한(카메라·위치) 상태 동기화. 부분 수정 — null로 온 필드는 기존값을 유지한다.
+     * <p>저장되는 값은 프로필 화면 표시용 캐시일 뿐 권한 검증 수단이 아니다(클라이언트가 매번 실제로
+     * 요청해 보고 그 결과를 여기에 알려주는 구조다).
+     * <p>{@code locationLinked}는 위치 <b>연동</b>이라는 다른 개념이라 여기서 건드리지 않는다.
+     */
+    public void updatePermissions(Boolean cameraPermission, Boolean locationPermission) {
+        if (cameraPermission != null) {
+            this.cameraPermission = cameraPermission;
+        }
+        if (locationPermission != null) {
+            this.locationPermission = locationPermission;
+        }
+    }
 }

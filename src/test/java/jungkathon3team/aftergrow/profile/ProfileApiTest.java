@@ -133,6 +133,49 @@ class ProfileApiTest {
     }
 
     @Test
+    void 권한상태_수정은_행이_없어도_생성하고_저장한다() throws Exception {
+        mockMvc.perform(patch("/users/me/integrations")
+                        .header("Authorization", bearer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"cameraPermission\":true,\"locationPermission\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.cameraPermission").value(true))
+                .andExpect(jsonPath("$.data.locationPermission").value(false))
+                .andExpect(jsonPath("$.data.appleHealthLinked").value(false));
+
+        // 저장된 값이 프로필 조회에도 반영되는지 확인
+        mockMvc.perform(get("/users/me/profile").header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.integrations.cameraPermission").value(true));
+    }
+
+    @Test
+    void 권한상태_수정은_부분_수정이라_생략한_필드는_기존값을_유지한다() throws Exception {
+        mockMvc.perform(patch("/users/me/integrations")
+                        .header("Authorization", bearer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"cameraPermission\":true,\"locationPermission\":true}"))
+                .andExpect(status().isOk());
+
+        // locationPermission만 꺼도 cameraPermission(true)은 그대로여야 한다
+        mockMvc.perform(patch("/users/me/integrations")
+                        .header("Authorization", bearer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"locationPermission\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.cameraPermission").value(true))
+                .andExpect(jsonPath("$.data.locationPermission").value(false));
+    }
+
+    @Test
+    void 권한상태_수정은_인증이_필요하다() throws Exception {
+        mockMvc.perform(patch("/users/me/integrations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"cameraPermission\":true}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void 알림설정_수정은_저장되고_요일은_영문으로_왕복한다() throws Exception {
         mockMvc.perform(patch("/users/me/notifications")
                         .header("Authorization", bearer)
