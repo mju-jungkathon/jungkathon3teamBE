@@ -1,5 +1,6 @@
 package jungkathon3team.aftergrow.profile.dto;
 
+import jungkathon3team.aftergrow.profile.entity.GoalType;
 import jungkathon3team.aftergrow.profile.entity.IntegrationStatus;
 import jungkathon3team.aftergrow.profile.entity.NotificationSetting;
 import jungkathon3team.aftergrow.profile.entity.UserGoal;
@@ -19,7 +20,8 @@ public record ProfileResponse(
         Notifications notifications
 ) {
 
-    public record Goal(String goalType, Integer weeklyRunGoal) {
+    /** {@code goalType}은 운동 목적, {@code weeklyRunGoal}은 주간 <b>횟수</b>다(거리 아님). */
+    public record Goal(GoalType goalType, Integer weeklyRunGoal) {
         public static Goal from(UserGoal g) {
             return g == null
                     ? new Goal(null, null)

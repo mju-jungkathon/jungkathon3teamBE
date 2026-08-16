@@ -69,9 +69,9 @@ class ProfileApiTest {
                         .header("Authorization", bearer)
                         .contentType(MediaType.APPLICATION_JSON)
                         .characterEncoding("UTF-8")
-                        .content("{\"goalType\":\"체력 증진\",\"weeklyRunGoal\":5}"))
+                        .content("{\"goalType\":\"FITNESS\",\"weeklyRunGoal\":5}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.goalType").value("체력 증진"))
+                .andExpect(jsonPath("$.data.goalType").value("FITNESS"))
                 .andExpect(jsonPath("$.data.weeklyRunGoal").value(5))
                 .andExpect(jsonPath("$.data.updatedAt").exists());
     }
@@ -83,7 +83,7 @@ class ProfileApiTest {
                         .header("Authorization", bearer)
                         .contentType(MediaType.APPLICATION_JSON)
                         .characterEncoding("UTF-8")
-                        .content("{\"goalType\":\"체력 증진\",\"weeklyRunGoal\":5}"))
+                        .content("{\"goalType\":\"FITNESS\",\"weeklyRunGoal\":5}"))
                 .andExpect(status().isOk());
 
         // goalType만 다시 보내면 weeklyRunGoal(5)은 그대로여야 한다
@@ -91,10 +91,24 @@ class ProfileApiTest {
                         .header("Authorization", bearer)
                         .contentType(MediaType.APPLICATION_JSON)
                         .characterEncoding("UTF-8")
-                        .content("{\"goalType\":\"근력 강화\"}"))
+                        .content("{\"goalType\":\"STRESS_RELIEF\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.goalType").value("근력 강화"))
+                .andExpect(jsonPath("$.data.goalType").value("STRESS_RELIEF"))
                 .andExpect(jsonPath("$.data.weeklyRunGoal").value(5));
+    }
+
+    /**
+     * goalType이 자유 문자열이던 시절의 값("WEEKLY_DISTANCE")이나 오타가 조용히 저장되지 않아야 한다.
+     * WEEKLY_DISTANCE는 "목적"이 아니라 "목표 산정 기준"이라 후보에서 제거됐다.
+     */
+    @Test
+    void 후보에_없는_goalType은_400_E4001() throws Exception {
+        mockMvc.perform(patch("/users/me/goal")
+                        .header("Authorization", bearer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"goalType\":\"WEEKLY_DISTANCE\",\"weeklyRunGoal\":5}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("E4001"));
     }
 
     @Test
