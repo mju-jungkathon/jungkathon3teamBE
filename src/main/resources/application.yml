@@ -8,3 +8,9 @@ openai:
   api-key: ${OPENAI_API_KEY:}
   model: ${OPENAI_MODEL:gpt-4o-mini}
   timeout-ms: ${OPENAI_TIMEOUT_MS:8000}
+
+# 기상청 생활기상지수(자외선지수) 서비스키.
+# 비워두면 UV 예보가 모의값으로 응답합니다(CI가 외부 API에 의존하지 않도록).
+# 기본값이 있으므로 프로파일별 yml에 따로 넣을 필요는 없습니다.
+kma:
+  service-key: ${KMA_SERVICE_KEY:}
