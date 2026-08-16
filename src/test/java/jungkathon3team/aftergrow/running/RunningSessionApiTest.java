@@ -4,6 +4,7 @@ import jungkathon3team.aftergrow.auth.entity.User;
 import jungkathon3team.aftergrow.auth.jwt.JwtTokenProvider;
 import jungkathon3team.aftergrow.auth.repository.UserRepository;
 import jakarta.persistence.EntityManager;
+import jungkathon3team.aftergrow.running.entity.Intensity;
 import jungkathon3team.aftergrow.running.entity.RoutePoint;
 import jungkathon3team.aftergrow.running.entity.RunningSession;
 import jungkathon3team.aftergrow.running.repository.RunningSessionRepository;
@@ -230,7 +231,136 @@ class RunningSessionApiTest {
                 .andExpect(jsonPath("$.data.startedAt").exists());
     }
 
+    // --- 기록 조회 ---
+
+    @Test
+    void 러닝_기록_목록은_최신순으로_반환하고_집계를_함께_준다() throws Exception {
+        ended(user, LocalDateTime.now().minusDays(3), 5.0, 1800);
+        ended(user, LocalDateTime.now().minusDays(1), 3.2, 1200);
+
+        mockMvc.perform(get("/running-sessions").header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records.length()").value(2))
+                // 최신(1일 전, 3.2km)이 먼저
+                .andExpect(jsonPath("$.data.records[0].distanceKm").value(3.2))
+                .andExpect(jsonPath("$.data.records[1].distanceKm").value(5.0))
+                .andExpect(jsonPath("$.data.summary.totalCount").value(2))
+                .andExpect(jsonPath("$.data.summary.totalDistanceKm").value(8.2))
+                .andExpect(jsonPath("$.data.summary.totalDurationSec").value(3000));
+    }
+
+    /** 목록에 경로를 실으면 세션당 수백 점이라 응답이 수백 KB가 된다. 있다/없다만 알려준다. */
+    @Test
+    void 목록에는_경로가_실리지_않고_보유_여부만_내려간다() throws Exception {
+        RunningSession session = inProgress(user, LocalDateTime.now().minusMinutes(30));
+        session.end(LocalDateTime.now(), 600, 2.0, Intensity.LOW,
+                List.of(new RoutePoint(37.5, 127.0, 0), new RoutePoint(37.51, 127.01, 10)));
+        runningSessionRepository.save(session);
+
+        mockMvc.perform(get("/running-sessions").header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records[0].hasRoutePath").value(true))
+                .andExpect(jsonPath("$.data.records[0].routePath").doesNotExist());
+    }
+
+    @Test
+    void 기록_목록은_range_밖의_세션을_제외한다() throws Exception {
+        ended(user, LocalDateTime.now().minusDays(40), 5.0, 1800);
+        ended(user, LocalDateTime.now().minusDays(2), 3.0, 1200);
+
+        mockMvc.perform(get("/running-sessions").header("Authorization", bearer)
+                        .param("range", "7d"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records.length()").value(1))
+                .andExpect(jsonPath("$.data.records[0].distanceKm").value(3.0));
+    }
+
+    @Test
+    void 잘못된_range는_400과_E4001을_반환한다() throws Exception {
+        mockMvc.perform(get("/running-sessions").header("Authorization", bearer)
+                        .param("range", "4w"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("E4001"));
+    }
+
+    @Test
+    void 기록_목록은_남의_세션을_포함하지_않는다() throws Exception {
+        ended(saveUser("other"), LocalDateTime.now().minusDays(1), 9.9, 3000);
+
+        mockMvc.perform(get("/running-sessions").header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records.length()").value(0))
+                .andExpect(jsonPath("$.data.summary.totalCount").value(0));
+    }
+
+    @Test
+    void 기록_상세는_지도에_그릴_경로를_포함한다() throws Exception {
+        RunningSession session = inProgress(user, LocalDateTime.now().minusMinutes(30));
+        session.end(LocalDateTime.now(), 600, 2.0, Intensity.LOW,
+                List.of(new RoutePoint(37.5440, 127.0557, 0), new RoutePoint(37.5442, 127.0559, 8)));
+        runningSessionRepository.save(session);
+
+        mockMvc.perform(get("/running-sessions/{id}", session.getRunningSessionId())
+                        .header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routePath.length()").value(2))
+                .andExpect(jsonPath("$.data.routePath[0].lat").value(37.5440))
+                .andExpect(jsonPath("$.data.routePath[0].t").value(0))
+                .andExpect(jsonPath("$.data.startLocation.lat").value(37.5))
+                .andExpect(jsonPath("$.data.status").value("ENDED"));
+    }
+
+    @Test
+    void 경로_없이_끝난_세션의_상세는_routePath가_null이다() throws Exception {
+        RunningSession session = ended(user, LocalDateTime.now().minusDays(1), 3.0, 1200);
+
+        mockMvc.perform(get("/running-sessions/{id}", session.getRunningSessionId())
+                        .header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routePath").doesNotExist());
+    }
+
+    @Test
+    void 남의_세션_상세는_403_E4030() throws Exception {
+        RunningSession other = ended(saveUser("other"), LocalDateTime.now().minusDays(1), 3.0, 1200);
+
+        mockMvc.perform(get("/running-sessions/{id}", other.getRunningSessionId())
+                        .header("Authorization", bearer))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("E4030"));
+    }
+
+    @Test
+    void 없는_세션_상세는_404_E4040() throws Exception {
+        mockMvc.perform(get("/running-sessions/{id}", UUID.randomUUID())
+                        .header("Authorization", bearer))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("E4040"));
+    }
+
+    /** /{id}가 /prepare를 삼키면 러닝 준비 화면이 통째로 깨진다. 회귀 방지용. */
+    @Test
+    void 상세_조회_경로가_prepare를_가리지_않는다() throws Exception {
+        mockMvc.perform(get("/running-sessions/prepare")
+                        .header("Authorization", bearer)
+                        .param("lat", "37.5").param("lng", "127.0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.uvIndex").exists());
+    }
+
+    @Test
+    void 기록_조회는_인증이_필요하다() throws Exception {
+        mockMvc.perform(get("/running-sessions"))
+                .andExpect(status().isUnauthorized());
+    }
+
     // --- helpers ---
+
+    private RunningSession ended(User owner, LocalDateTime startedAt, double distanceKm, int durationSec) {
+        RunningSession session = RunningSession.start(owner, startedAt, 37.5, 127.0, 5);
+        session.end(startedAt.plusSeconds(durationSec), durationSec, distanceKm, Intensity.MODERATE, null);
+        return runningSessionRepository.save(session);
+    }
 
     private User saveUser(String prefix) {
         return userRepository.save(User.builder()

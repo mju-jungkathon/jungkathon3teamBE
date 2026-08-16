@@ -1,6 +1,7 @@
 package jungkathon3team.aftergrow.heartrate.service;
 
 import jungkathon3team.aftergrow.common.exception.BusinessException;
+import jungkathon3team.aftergrow.common.request.RangeParam;
 import jungkathon3team.aftergrow.common.exception.ErrorCode;
 import jungkathon3team.aftergrow.heartrate.dto.AppleHealthDto;
 import jungkathon3team.aftergrow.heartrate.dto.HeartRateMeasurementResponse;
@@ -25,9 +26,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * R4 심박수 측정 · R6 측정 기록.
@@ -38,11 +40,6 @@ import java.util.regex.Pattern;
 @Transactional(readOnly = true)
 public class HeartRateMeasurementService {
 
-    static final String DEFAULT_RANGE = "30d";
-
-    /** 지원 형식은 "{일수}d" 하나뿐이다. 주/월 단위는 명세에 없어 받지 않는다. */
-    private static final Pattern RANGE_PATTERN = Pattern.compile("(\\d+)d");
-
     private final HeartRateMeasurementRepository heartRateMeasurementRepository;
     private final RunningSessionRepository runningSessionRepository;
     private final IntegrationStatusRepository integrationStatusRepository;
@@ -50,29 +47,11 @@ public class HeartRateMeasurementService {
 
     /**
      * R6.1의 {@code range} 파라미터를 조회 하한 시각으로 바꾼다.
-     * <p>순수 함수라 DB 없이 테스트한다. 생략/공백이면 기본 30일.
+     * <p>러닝 기록 목록도 같은 규칙을 쓰므로 실제 파싱은 {@link RangeParam}에 있다.
+     * 이 메서드는 기존 호출부·테스트를 위해 남겨 둔 위임이다.
      */
     static LocalDateTime sinceOf(String range, LocalDateTime now) {
-        String value = (range == null || range.isBlank()) ? DEFAULT_RANGE : range.trim();
-
-        Matcher matcher = RANGE_PATTERN.matcher(value);
-        if (!matcher.matches()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST); // E4001
-        }
-
-        long days;
-        try {
-            days = Long.parseLong(matcher.group(1));
-        } catch (NumberFormatException e) {
-            // long을 넘는 자릿수. 그대로 두면 500이 되므로 잘못된 요청으로 돌린다.
-            throw new BusinessException(ErrorCode.INVALID_REQUEST); // E4001
-        }
-
-        if (days <= 0) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST); // E4001
-        }
-
-        return now.minusDays(days);
+        return RangeParam.since(range, now);
     }
 
     /**
@@ -90,6 +69,30 @@ public class HeartRateMeasurementService {
                 .toList();
 
         return new HeartRateRecordsResponse(items, sourceRatioOf(measurements));
+    }
+
+    /**
+     * 러닝 기록 목록용: range 내 세션별 평균 bpm 맵.
+     * <p>세션마다 따로 조회하면 N+1이 되므로 한 번에 읽어 접는다. 측정이 최신순으로 오므로
+     * 먼저 담긴 것이 최신이고, 뒤에 오는 오래된 측정은 덮어쓰지 않는다.
+     * <p>실패(FAILED) 측정은 avgBpm이 null이라 목록에 섞이면 안 되므로 제외한다.
+     */
+    public Map<UUID, Integer> avgBpmBySessionSince(UUID userId, LocalDateTime since) {
+        return heartRateMeasurementRepository
+                .findByRunningSession_User_UserIdAndMeasuredAtGreaterThanEqualOrderByMeasuredAtDesc(userId, since)
+                .stream()
+                .filter(m -> m.getSyncStatus() == SyncStatus.SUCCESS && m.getAvgBpm() != null)
+                .collect(Collectors.toMap(
+                        m -> m.getRunningSession().getRunningSessionId(),
+                        HeartRateMeasurement::getAvgBpm,
+                        (latest, older) -> latest));
+    }
+
+    /** 러닝 기록 상세용: 해당 세션의 가장 최근 "성공" 측정 1건. */
+    public Optional<HeartRateMeasurement> latestSuccessfulMeasurement(UUID runningSessionId) {
+        return heartRateMeasurementRepository
+                .findTopByRunningSession_RunningSessionIdAndSyncStatusOrderByMeasuredAtDesc(
+                        runningSessionId, SyncStatus.SUCCESS);
     }
 
     /** rppgFailedCount는 rppg에서 빠지는 값이 아니라 부분집합이다. */

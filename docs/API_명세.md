@@ -45,7 +45,11 @@
 • `POST /recovery-guides/{id}/cooldown-timer/start`
 
 • `POST /running-sessions/{id}/complete` |
-| **8** | **측정 기록** | • `GET /heart-rate-measurements?range=30d`
+| **8** | **측정 기록** | • `GET /running-sessions?range=30d` *(러닝 기록 목록)*
+
+• `GET /running-sessions/{id}` *(경로 포함 상세)*
+
+• `GET /heart-rate-measurements?range=30d`
 
 • `POST /heart-rate-measurements/{id}/retry` |
 | **9** | **프로필 & 설정** | • `GET /users/me/profile`
@@ -170,8 +174,21 @@
 **Response 201**
 
 ```json
-{ "userId": "uuid", "email": "you@example.com", "nickname": "김러너", "createdAt": "2026-08-07T16:22:15.4986088" }
+{
+  "userId": "uuid", "email": "you@example.com", "nickname": "김러너",
+  "createdAt": "2026-08-07T16:22:15.4986088",
+  "accessToken": "jwt", "refreshToken": "jwt", "expiresIn": 3600
+}
 ```
+
+> **가입 응답에 토큰이 포함됩니다.** 온보딩에서 곧바로 §7.2 `PATCH /users/me/goal`(운동 목적·주간 횟수)을
+> 불러야 하는데, 이 때문에 `POST /auth/login`을 한 번 더 호출할 필요가 없습니다.
+> `refreshToken`은 로그인과 동일하게 서버에 저장되어 로그아웃으로 즉시 무효화됩니다.
+>
+> ```
+> POST /auth/signup            → accessToken 확보
+> PATCH /users/me/goal         → 온보딩에서 고른 목적·횟수 저장
+> ```
 
 **에러**
 
@@ -415,6 +432,69 @@
 - `defaultHeartRateSource`는 화면 5에서 기본으로 선택해 둘 측정 방식입니다.
   가장 최근 측정의 방식을 쓰고, 측정 이력이 없으면 애플 헬스 연동 여부에 따라 `WATCH`/`RPPG`입니다.
   사용자는 화면 5 상단의 버튼으로 다른 방식을 고를 수 있습니다.
+
+---
+
+### 3.6 러닝 기록 목록
+
+`GET /running-sessions?range=30d`
+
+**Response 200**
+
+```json
+{
+  "records": [
+    { "runningSessionId": "uuid", "startedAt": "…", "endedAt": "…",
+      "durationSec": 1452, "distanceKm": 4.8, "intensity": "MODERATE",
+      "status": "ENDED", "uvIndexAtStart": 5, "avgBpm": 146, "hasRoutePath": true }
+  ],
+  "summary": { "totalCount": 12, "totalDistanceKm": 48.3, "totalDurationSec": 17424 }
+}
+```
+
+- `range`는 `"{일수}d"` 형식, 기본 `30d`. 형식이 틀리면 400 `E4001`(§6.1과 같은 규칙).
+- 최신순 정렬. **진행 중(`IN_PROGRESS`) 세션도 포함**됩니다.
+- `avgBpm`은 해당 세션의 최근 **성공** 측정값입니다. 측정이 없거나 실패만 있으면 `null`.
+- **`routePath`는 목록에 없습니다.** 세션당 수백 점이라 응답이 수백 KB가 되기 때문입니다.
+  `hasRoutePath`로 "지도 보기" 노출 여부만 판단하고, 좌표는 상세(§3.7)에서 받으세요.
+- 페이지네이션은 없습니다. `range`로 조절하세요.
+
+### 3.7 러닝 기록 상세
+
+`GET /running-sessions/{id}`
+
+**Response 200**
+
+```json
+{
+  "runningSessionId": "uuid", "startedAt": "…", "endedAt": "…",
+  "durationSec": 1452, "distanceKm": 4.8, "intensity": "MODERATE",
+  "status": "ENDED", "uvIndexAtStart": 5,
+  "startLocation": { "lat": 37.5440, "lng": 127.0557 },
+  "routePath": [ { "lat": 37.5440, "lng": 127.0557, "t": 0 } ],
+  "heartRate": { "heartRateSource": "RPPG", "avgBpm": 146, "maxBpm": 171, "hrvMs": 42, "measuredAt": "…" }
+}
+```
+
+- `routePath`는 **경로 없이 종료한 세션에서 `null`**입니다. 지도 대신 빈 상태를 보여주세요.
+- `startLocation`은 경로가 없어도 지도 중심을 잡을 수 있게 따로 내려갑니다.
+- `heartRate`는 측정이 없으면 `null`.
+- **지도 렌더링은 전적으로 클라이언트 몫입니다.** 서버는 좌표 배열만 돌려주며 카카오맵 API를 호출하지 않습니다.
+
+```js
+const { data } = await api.get(`/running-sessions/${id}`);
+new kakao.maps.Polyline({
+  path: data.routePath.map(p => new kakao.maps.LatLng(p.lat, p.lng)),
+  strokeWeight: 5, strokeColor: '#e4572e',
+});
+```
+
+**에러**
+
+| 상황 | 코드 |
+| --- | --- |
+| 남의 세션 | 403 `E4030` |
+| 없는 세션 / id가 UUID가 아님 | 404 `E4040` / 400 `E4001` |
 
 ---
 
@@ -860,7 +940,7 @@
 | 5. 심박수 확인(워치) | 4.1, 4.2, 4.3 |
 | 6. 심박수 확인(rPPG 안내) | 4.4, 4.5, 4.6 |
 | 7. 오늘의 회복 가이드 | 5.1, 5.2, 5.3 |
-| 8. 측정 기록 | 6.1, 6.2 |
+| 8. 측정 기록 | 3.6, 3.7, 6.1, 6.2 |
 | 9. 프로필 | 7.1 ~ 7.5, 1.4 |
 
 ## 부록 B. 참고 엔티티

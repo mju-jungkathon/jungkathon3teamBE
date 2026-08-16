@@ -18,8 +18,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jungkathon3team.aftergrow.common.request.RangeParam;
+
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -125,6 +129,50 @@ public class RunningSessionService {
                 // 화면 5의 기본 선택지. 러닝 종료 → 화면 5 진입이 유일한 경로라 여기서 함께 내려준다.
                 heartRateMeasurementService.defaultSourceFor(userId)
         );
+    }
+
+    /**
+     * GET /running-sessions?range=30d — 러닝 기록 목록.
+     * <p>세션마다 심박수를 따로 조회하면 N+1이 되므로, range 내 측정을 한 번에 읽어
+     * 세션별 최신 1건으로 접어 쓴다(측정은 최신순으로 오므로 먼저 담긴 것이 최신이다).
+     */
+    public RunningRecordsResponse getRecords(UUID userId, String range) {
+        LocalDateTime since = RangeParam.since(range, LocalDateTime.now());
+
+        List<RunningSession> sessions = runningSessionRepository
+                .findByUser_UserIdAndStartedAtGreaterThanEqualOrderByStartedAtDesc(userId, since);
+
+        Map<UUID, Integer> avgBpmBySession = heartRateMeasurementService.avgBpmBySessionSince(userId, since);
+
+        List<RunningRecordsResponse.Item> items = sessions.stream()
+                .map(s -> RunningRecordsResponse.Item.of(s, avgBpmBySession.get(s.getRunningSessionId())))
+                .toList();
+
+        return new RunningRecordsResponse(items, summaryOf(sessions));
+    }
+
+    private RunningRecordsResponse.Summary summaryOf(List<RunningSession> sessions) {
+        double totalDistanceKm = sessions.stream()
+                .filter(s -> s.getDistanceKm() != null)
+                .mapToDouble(RunningSession::getDistanceKm)
+                .sum();
+        int totalDurationSec = sessions.stream()
+                .filter(s -> s.getDurationSec() != null)
+                .mapToInt(RunningSession::getDurationSec)
+                .sum();
+        // 부동소수 누적 오차가 응답에 그대로 드러나지 않도록 소수 둘째 자리에서 끊는다.
+        return new RunningRecordsResponse.Summary(
+                sessions.size(),
+                Math.round(totalDistanceKm * 100) / 100.0,
+                totalDurationSec);
+    }
+
+    /** GET /running-sessions/{id} — 상세. routePath(지도용 좌표 배열)는 여기에만 실린다. */
+    public RunningSessionDetailResponse getDetail(UUID userId, UUID sessionId) {
+        RunningSession session = getOwnedSession(userId, sessionId);
+        return RunningSessionDetailResponse.of(
+                session,
+                heartRateMeasurementService.latestSuccessfulMeasurement(sessionId).orElse(null));
     }
 
     private RunningSession getOwnedSession(UUID userId, UUID sessionId) {
