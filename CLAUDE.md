@@ -40,7 +40,7 @@ SPRING_PROFILES_ACTIVE=test SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:54
 
 CI(`.github/workflows/test.yml`)는 `SPRING_PROFILES_ACTIVE=test`로 돌고, **datasource/redis 접속 정보만 환경변수로 주입**합니다. 나머지(`jwt.*`, `ddl-auto`, flyway)는 커밋되는 `src/test/resources/application-test.yml`에 있습니다.
 
-**외부 API 키(`OPENAI_API_KEY`, `KMA_SERVICE_KEY`)는 예외입니다.** 커밋되는 `application.yml`에 `${KMA_SERVICE_KEY:}`처럼 **기본값 있는** 플레이스홀더로 두므로 프로파일별 yml 세 곳에 넣을 필요가 없습니다. 실제 값은 로컬은 `application-local.yml`, 배포는 EC2의 `.env`(+ `docker-compose.prod.yml`의 environment 한 줄)에 넣습니다. **`gradlew bootRun`은 `.env`를 읽지 않습니다** — `.env`는 docker compose 전용이라, 로컬에서 실제 키로 테스트하려면 `application-local.yml`에 넣어야 합니다. 키가 비면 각각 규칙 기반 회복 가이드 / 모의 UV 예보로 폴백합니다.
+**외부 API 키(`OPENAI_API_KEY`, `KMA_AUTH_KEY`)는 예외입니다.** 커밋되는 `application.yml`에 `${KMA_AUTH_KEY:}`처럼 **기본값 있는** 플레이스홀더로 두므로 프로파일별 yml 세 곳에 넣을 필요가 없습니다. 실제 값은 로컬은 `application-local.yml`, 배포는 EC2의 `.env`(+ `docker-compose.prod.yml`의 environment 한 줄)에 넣습니다. **`gradlew bootRun`은 `.env`를 읽지 않습니다** — `.env`는 docker compose 전용이라, 로컬에서 실제 키로 테스트하려면 `application-local.yml`에 넣어야 합니다. 키가 비면 각각 규칙 기반 회복 가이드 / 모의 UV 예보로 폴백합니다.
 
 > ⚠️ **(기본값 없는) 설정 키를 추가할 때는 세 파일 전부에 넣으세요** — `application-local.yml`(로컬), `src/test/resources/application-test.yml`(CI), `src/main/resources/application-prod.yml`(배포). local에만 넣으면 로컬 테스트는 통과하고 CI만 `PlaceholderResolutionException`으로 죽습니다. 실제로 `jwt.*`에서 한 번 겪었습니다. **prod만 빠뜨리면 로컬과 CI가 전부 통과하고 배포된 서버만 기동 시 죽습니다** — 가장 늦게 발견되는 형태입니다.
 
@@ -191,6 +191,7 @@ jungkathon3team.aftergrow
 - `POST /running-sessions/{id}/end`는 **멱등**입니다. 이미 끝난 세션에 다시 호출하면 에러 대신 현재 상태를 그대로 돌려줍니다(명세에 전용 에러 코드가 없어서 내린 결정). 진행 중 세션이 있는데 새로 시작하면 `E4090`.
 - `running/external/`의 `MockUvIndexClient`·`MockLocationLabelResolver`는 **인터페이스 뒤에 있는 임시 구현**입니다. 실제 API(기상청/Open-Meteo, 카카오 로컬)를 붙일 때 새 `@Component`를 만들고 목의 `@Component`를 제거하세요. UV 지수 → 라벨("낮음"…"위험") 변환은 `UvIndexClient.UvIndexResult.of()` 한 곳에만 두고 재구현하지 마세요 — 홈 주간 요약도 이걸 씁니다.
 - **`running/external/UvIndexClient`(그 순간의 단일 UV)와 `weather/external/UvForecastClient`(하루치 배열)는 다른 것입니다.** 전자는 러닝 준비/진행 화면용이고 아직 목 구현이며, 후자가 기상청 실연동입니다. 전자를 실연동으로 바꿀 때는 후자의 `KmaUvForecastClient`에서 배열을 받아 현재 시각 값을 고르는 편이 외부 호출을 아낍니다(캐시를 공유하게 되므로).
+- **UV 예보 키는 공공데이터포털(data.go.kr)에서 받아야 합니다. 기상청 API허브(apihub.kma.go.kr) 키로는 안 됩니다.** 두 포털은 별개로 가입·발급하며 키가 호환되지 않고, 무엇보다 **API허브에는 자외선 '예보'가 없습니다** (`LivingWthrIdxService*`는 전부 404, 있는 건 `typ01/url/kma_sfctm_uv.php` 지점 실측 관측뿐이라 미래 시간대를 못 줍니다). API허브 경로를 확인할 땐 404=경로 틀림, 403=경로는 맞고 활용신청 필요로 구분하면 됩니다.
 - **기상청 자외선지수 API는 격자좌표(nx/ny)가 아니라 행정구역코드(`areaNo`)를 받습니다.** 격자좌표를 쓰는 건 초단기·단기예보이고 거기엔 UV 항목이 없습니다. LCC 투영 변환 코드를 찾지 마세요 — 없는 게 맞고, `weather/external/AreaCodeResolver`가 광역시도 17개 중 최근접 지점을 고릅니다.
 - `HomeService`의 주 단위는 **월요일 시작**(`TemporalAdjusters.previousOrSame(MONDAY)`)이고, "완료"는 `ENDED` + `COMPLETED` 둘 다입니다(`COMPLETED_STATUSES`). 새 집계를 추가할 땐 이 상수를 재사용하세요.
 - 홈 집계 쿼리는 `HomeService`가 아니라 리포지토리의 `@Query`(`sumDistanceKmBetween`, `avgBpmBetween`, `avgUvIndexBetween`)에 있습니다. **합계는 `coalesce(...,0)`로 0을, 평균은 null을 반환**하는 게 의도된 구분입니다(측정 없음 = null로 응답).

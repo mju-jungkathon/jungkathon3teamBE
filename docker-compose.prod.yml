@@ -28,7 +28,7 @@ services:
       # 필수가 아니므로 .env에 없어도 compose 경고 없이 빈 값으로 넘깁니다.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # 비어 있으면 UV 예보가 모의값으로 응답합니다(MockUvForecastClient). 위와 같은 이유로 선택입니다.
-      KMA_SERVICE_KEY: ${KMA_SERVICE_KEY:-}
+      KMA_AUTH_KEY: ${KMA_AUTH_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

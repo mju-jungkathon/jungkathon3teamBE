@@ -16,7 +16,15 @@ import java.util.List;
 /**
  * 기상청 생활기상지수 자외선지수 API({@code LivingWthrIdxServiceV4/getUVIdxV4}) 연동.
  *
- * <p>{@code kma.service-key}가 비어 있으면 {@link UvForecastClientConfig}가 이 구현 대신
+ * <p><b>공공데이터포털(apis.data.go.kr)을 쓴다. 기상청 API허브(apihub.kma.go.kr)로는 안 된다.</b>
+ * API허브에도 기상청 API가 여럿 미러링돼 있지만 <b>자외선 예보는 없다</b> —
+ * {@code LivingWthrIdxService*}는 어떤 조합으로 불러도 404("유효하지 않은 API")이고,
+ * API허브의 자외선은 {@code typ01/url/kma_sfctm_uv.php}(지점별 실측 관측)뿐이라 미래 시간대를 못 준다.
+ * 두 포털은 <b>키가 호환되지 않으므로</b>(각각 가입·발급) 여기 들어갈 값은 공공데이터포털 서비스키다.
+ *
+ * <p>경로 확인 요령: API허브는 경로가 틀리면 404, 경로는 맞고 활용신청이 없으면 403을 준다.
+ *
+ * <p>{@code kma.auth-key}가 비어 있으면 {@link UvForecastClientConfig}가 이 구현 대신
  * {@link MockUvForecastClient}를 등록한다
  * (CI에는 키가 없고, 외부 API를 때리는 테스트는 네트워크 상태에 따라 깨져 CI를 못 믿게 만든다).
  *
@@ -41,14 +49,14 @@ public class KmaUvForecastClient implements UvForecastClient {
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
-    private final String serviceKey;
+    private final String authKey;
 
     public KmaUvForecastClient(RestClient.Builder builder,
                                ObjectMapper objectMapper,
-                               String serviceKey) {
+                               String authKey) {
         this.restClient = builder.build();
         this.objectMapper = objectMapper;
-        this.serviceKey = serviceKey;
+        this.authKey = authKey;
     }
 
     @Override
@@ -76,12 +84,12 @@ public class KmaUvForecastClient implements UvForecastClient {
         try {
             body = restClient.get()
                     .uri(uriBuilder -> uriBuilder
-                            // 공공데이터포털 serviceKey는 이미 URL 인코딩된 형태로도 발급된다.
-                            // build(false)로 재인코딩을 막아 두 형태 모두 그대로 전달되게 한다
+                            // 인증키에 +/= 같은 문자가 들어갈 수 있고 이미 인코딩된 형태로 발급되기도 한다.
+                            // build(false)로 재인코딩을 막아 발급받은 문자열이 그대로 전달되게 한다
                             // (재인코딩하면 %2B가 %252B가 되어 인증 실패한다).
                             .scheme("https").host("apis.data.go.kr")
                             .path("/1360000/LivingWthrIdxServiceV4/getUVIdxV4")
-                            .queryParam("serviceKey", serviceKey)
+                            .queryParam("serviceKey", authKey)
                             .queryParam("areaNo", areaNo)
                             .queryParam("time", announcedAt.format(ANNOUNCED_AT))
                             .queryParam("dataType", "JSON")
@@ -107,7 +115,7 @@ public class KmaUvForecastClient implements UvForecastClient {
         try {
             root = objectMapper.readTree(body);
         } catch (Exception e) {
-            log.warn("기상청 응답을 JSON으로 읽지 못했습니다. 서비스키가 잘못됐을 수 있습니다. body={}",
+            log.warn("기상청 응답을 JSON으로 읽지 못했습니다. 인증키가 잘못됐을 수 있습니다. body={}",
                     abbreviate(body), e);
             throw new BusinessException(ErrorCode.UV_FORECAST_FAILED); // E5011
         }

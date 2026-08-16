@@ -13,4 +13,4 @@ openai:
 # 비워두면 UV 예보가 모의값으로 응답합니다(CI가 외부 API에 의존하지 않도록).
 # 기본값이 있으므로 프로파일별 yml에 따로 넣을 필요는 없습니다.
 kma:
-  service-key: ${KMA_SERVICE_KEY:}
+  auth-key: ${KMA_AUTH_KEY:}

@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,13 +25,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * GET /weather/uv-forecast 통합 테스트.
- * <p>CI에는 {@code kma.service-key}가 없으므로 MockUvForecastClient가 응답한다 —
+ * <p>CI에는 {@code kma.auth-key}가 없으므로 MockUvForecastClient가 응답한다 —
  * 값 자체가 아니라 <b>응답 형태와 캐시 동작</b>을 고정하는 테스트다.
  * 기상청 실연동 검증은 키를 넣은 로컬에서 수동으로 한다.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
+// 로컬 개발자가 application-local.yml에 실제 키를 넣어 두면 이 테스트가 진짜 기상청을 호출하게 된다.
+// 그러면 네트워크·발급 상태에 따라 결과가 달라져 테스트를 믿을 수 없으므로 여기서 강제로 비운다.
+@TestPropertySource(properties = "kma.auth-key=")
 class UvForecastApiTest {
 
     @Autowired
