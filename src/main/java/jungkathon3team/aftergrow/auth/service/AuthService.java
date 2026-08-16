@@ -37,11 +37,11 @@ public class AuthService {
             throw new BusinessException(ErrorCode.DUPLICATE_EMAIL);
         }
 
-        User user = User.builder()
-                .email(request.email())
-                .passwordHash(passwordEncoder.encode(request.password()))
-                .nickname(request.nickname())
-                .build();
+        User user = User.signup(
+                request.email(),
+                passwordEncoder.encode(request.password()),
+                request.nickname(),
+                request.marketingAgreed());
 
         return SignupResponse.from(userRepository.save(user));
     }
