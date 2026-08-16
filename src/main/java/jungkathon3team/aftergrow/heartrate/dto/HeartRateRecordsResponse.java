@@ -1,6 +1,7 @@
 package jungkathon3team.aftergrow.heartrate.dto;
 
 import jungkathon3team.aftergrow.heartrate.entity.HeartRateMeasurement;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jungkathon3team.aftergrow.heartrate.entity.HeartRateSource;
 import jungkathon3team.aftergrow.heartrate.entity.SyncStatus;
 
@@ -18,6 +19,7 @@ public record HeartRateRecordsResponse(
         SourceRatio sourceRatio
 ) {
     /** {@code Record}라는 이름은 {@code java.lang.Record}를 가려서 쓰지 않는다. */
+    @Schema(name = "HeartRateRecordItem")
     public record Item(
             UUID heartRateMeasurementId,
             LocalDateTime measuredAt,

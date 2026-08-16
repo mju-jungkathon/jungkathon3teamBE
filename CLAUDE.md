@@ -30,6 +30,8 @@ SPRING_PROFILES_ACTIVE=test SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:54
 ```
 
 - 서버: http://localhost:8080 / Swagger UI: http://localhost:8080/swagger-ui.html
+- **중첩 DTO(`XxxDto.Request`)에는 `@Schema(name = "...")`로 유일한 이름을 주세요.** springdoc은 단순 클래스명으로 스키마를 만들기 때문에, 이름이 없으면 9개 엔드포인트의 `Request`가 **하나로 뭉쳐 서로의 예시를 보여줍니다**(실제로 러닝 시작·종료가 스트레칭의 `{"type":"PRE_RUN"}`을 예시로 띄우고 있었습니다). `Item`·`Location`처럼 흔한 중첩 이름도 같은 함정입니다.
+- **소수 예시는 `@Schema(example=...)`로 넣으면 문자열(`"37.5665"`)로 렌더링됩니다.** springdoc이 정수·불리언만 변환합니다. 숫자로 보여야 하는 요청 본문은 컨트롤러에 `@ExampleObject`로 본문 전체를 적으세요(`RunningSessionController` 참고).
 - Swagger에서 인증이 필요한 API를 호출하려면 우측 상단 **Authorize**에 로그인 응답의 `accessToken`을 넣으세요(refreshToken 아님). 설정은 `common/config/OpenApiConfig`에 있고 **전역으로 걸려 있어**, 토큰 없이 호출하는 엔드포인트에는 `@SecurityRequirements`(복수형, 빈 값)를 붙여 해제합니다.
 - 공개 경로는 `SecurityConfig`의 `PUBLIC_PATHS`에 **명시적으로 나열**돼 있습니다(`/auth/signup`, `/auth/login`, `/auth/refresh`, swagger). 그 외는 `Authorization: Bearer {accessToken}`이 필요합니다. **`/auth/**` 와일드카드를 쓰지 마세요** — `/auth/logout`은 인증이 필요한데 와일드카드로 열면 `@AuthenticationPrincipal`이 null로 들어옵니다.
 - lint/formatter 설정 없음(`.editorconfig`, checkstyle, spotless 모두 없음).

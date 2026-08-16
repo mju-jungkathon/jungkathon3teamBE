@@ -1,6 +1,7 @@
 package jungkathon3team.aftergrow.running.dto;
 
 import jungkathon3team.aftergrow.heartrate.entity.HeartRateMeasurement;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jungkathon3team.aftergrow.heartrate.entity.HeartRateSource;
 import jungkathon3team.aftergrow.running.entity.Intensity;
 import jungkathon3team.aftergrow.running.entity.RoutePoint;
@@ -52,6 +53,7 @@ public record RunningSessionDetailResponse(
     }
 
     /** 러닝 시작 지점. 경로가 없어도 지도 중심을 잡을 수 있게 따로 내려준다. */
+    @Schema(name = "RunningDetailLocation")
     public record Location(Double lat, Double lng) {
     }
 

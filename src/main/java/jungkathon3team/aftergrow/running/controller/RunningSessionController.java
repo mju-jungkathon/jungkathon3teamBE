@@ -1,6 +1,9 @@
 package jungkathon3team.aftergrow.running.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jungkathon3team.aftergrow.common.response.ApiResponse;
@@ -39,7 +42,9 @@ public class RunningSessionController {
             description = "화면 3 진입 시 UV/위치/스트레칭을 안내합니다.")
     @GetMapping("/prepare")
     public ApiResponse<RunningPrepareResponse> prepare(
+            @Parameter(description = "현재 위치 위도(브라우저 geolocation)", example = "37.5665")
             @RequestParam double lat,
+            @Parameter(description = "현재 위치 경도", example = "126.9780")
             @RequestParam double lng
     ) {
         return ApiResponse.ok(runningSessionService.prepare(lat, lng));
@@ -51,6 +56,7 @@ public class RunningSessionController {
     @GetMapping
     public ApiResponse<RunningRecordsResponse> getRecords(
             @AuthenticationPrincipal UUID userId,
+            @Parameter(description = "조회 기간. \"{일수}d\" 형식이며 생략하면 30d입니다.", example = "30d")
             @RequestParam(required = false) String range
     ) {
         return ApiResponse.ok(runningSessionService.getRecords(userId, range));
@@ -76,6 +82,13 @@ public class RunningSessionController {
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<RunningStartDto.Response> start(
             @AuthenticationPrincipal UUID userId,
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    content = @Content(examples = @ExampleObject(name = "서울 시청 출발", value = """
+                            {
+                              "startedAt": "2026-08-16T07:00:00",
+                              "location": { "lat": 37.5665, "lng": 126.9780 },
+                              "uvIndexAtStart": 5
+                            }""")))
             @Valid @RequestBody RunningStartDto.Request request
     ) {
         return ApiResponse.ok(runningSessionService.startRunning(userId, request));
@@ -87,7 +100,10 @@ public class RunningSessionController {
     public ApiResponse<RunningLiveResponse> getLive(
             @AuthenticationPrincipal UUID userId,
             @PathVariable("id") UUID sessionId,
+            @Parameter(description = "클라이언트가 로컬로 계산한 현재까지의 거리(km). 보내면 서버 값이 갱신됩니다.",
+                    example = "2.5")
             @RequestParam(required = false) Double distanceKm,
+            @Parameter(description = "현재 러닝 강도. 보내면 서버 값이 갱신됩니다.", example = "MODERATE")
             @RequestParam(required = false) Intensity intensity
     ) {
         return ApiResponse.ok(runningSessionService.getLive(userId, sessionId, distanceKm, intensity));
@@ -99,6 +115,27 @@ public class RunningSessionController {
     public ApiResponse<RunningEndDto.Response> end(
             @AuthenticationPrincipal UUID userId,
             @PathVariable("id") UUID sessionId,
+            @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    content = @Content(examples = {
+                            @ExampleObject(name = "경로 포함(지도를 쓸 경우)", value = """
+                                    {
+                                      "endedAt": "2026-08-16T07:24:12",
+                                      "durationSec": 1452,
+                                      "distanceKm": 4.8,
+                                      "intensity": "MODERATE",
+                                      "routePath": [
+                                        { "lat": 37.5665, "lng": 126.9780, "t": 0 },
+                                        { "lat": 37.5672, "lng": 126.9791, "t": 8 },
+                                        { "lat": 37.5688, "lng": 126.9812, "t": 17 }
+                                      ]
+                                    }"""),
+                            @ExampleObject(name = "경로 없이 종료", value = """
+                                    {
+                                      "endedAt": "2026-08-16T07:24:12",
+                                      "durationSec": 1452,
+                                      "distanceKm": 4.8,
+                                      "intensity": "MODERATE"
+                                    }""")}))
             @Valid @RequestBody RunningEndDto.Request request
     ) {
         return ApiResponse.ok(runningSessionService.endRunning(userId, sessionId, request));
