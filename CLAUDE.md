@@ -21,7 +21,7 @@ docker compose up -d          # PostgreSQL + Redis (실행 필수, 아래 참고
 
 **`test`/`build`는 Docker 컨테이너가 떠 있어야 통과합니다.** `contextLoads()`가 `@SpringBootTest`로 실제 PostgreSQL에 붙기 때문에 컨테이너 없이 돌리면 HibernateException으로 실패합니다. 빌드 실패 시 가장 먼저 `docker compose ps`로 postgres/redis가 healthy인지 확인하세요.
 
-테스트는 25개 클래스 209개 `@Test` 메서드이고, `running`(`RunningSessionApiTest`)·`home`(`HomeDashboardTest`)·`heartrate`(`HeartRateControllerTest`)·`profile`(`ProfileApiTest`)을 포함해 모든 도메인에 통합 테스트가 있습니다. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
+테스트는 26개 클래스 216개 `@Test` 메서드이고, `running`(`RunningSessionApiTest`)·`home`(`HomeDashboardTest`)·`heartrate`(`HeartRateControllerTest`)·`profile`(`ProfileApiTest`)을 포함해 모든 도메인에 통합 테스트가 있습니다. **로컬은 `local` 프로파일, CI는 `test` 프로파일**로 돌아갑니다.
 
 CI 환경을 로컬에서 재현하려면 (프로파일별로 설정이 달라 한쪽만 통과하는 일이 생깁니다):
 
@@ -180,9 +180,9 @@ jungkathon3team.aftergrow
 
 아직 없는 것:
 
+- **회원 탈퇴(`DELETE /users/me`)는 DB `ON DELETE CASCADE`에 기댑니다.** 자바 쪽에서 자식 행을 지우는 코드가 없으니 찾지 마세요. 새 테이블을 만들 때 `users`를 참조한다면 반드시 `ON DELETE CASCADE`를 붙여야 탈퇴가 FK 위반으로 실패하지 않습니다. `WithdrawControllerTest`는 **`@Transactional`을 쓰지 않습니다** — 롤백되면 CASCADE가 실제로 동작했는지 확인할 수 없기 때문이고, 대신 테스트가 직접 정리합니다.
 - **`integration_status.location_linked`를 켜는 곳이 없습니다.** `PATCH /users/me/integrations`는 camera/location `permission`만, `apple-health/link`는 `appleHealthLinked`만 건드려서 이 컬럼은 항상 false로만 응답합니다. 명세에도 켜는 수단이 없습니다.
 - **스트레칭 세션은 write-only입니다.** `POST /stretching-sessions`로 행은 쌓이는데 조회 API도 홈 집계 반영도 없습니다.
-- **회원 탈퇴(users DELETE)가 없습니다.**
 - **주간 "거리" 목표를 저장할 곳이 없습니다.** `weeklyRunGoal`은 횟수 전용으로 확정됐습니다. `USER_GOALS`에 `weeklyDistanceGoalKm`를 신설할지 UI를 없앨지 팀 결정 대기 중입니다.
 - `RedisConfig` — `StringRedisTemplate` 자동 구성으로 충분해 아직 불필요합니다.
 - **러닝 진행 상태의 Redis 저장** — 원래 설계는 `/live`를 Redis로 받는 것이었지만, 현재 구현은 Postgres의 `running_sessions` 행을 직접 갱신합니다(아래 참고).

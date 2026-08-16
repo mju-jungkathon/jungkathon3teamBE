@@ -60,6 +60,8 @@
 
 • `PATCH /users/me/notifications`
 
+• `DELETE /users/me` *(회원 탈퇴)*
+
 • `POST /auth/logout` |
 
 ### 인증
@@ -815,6 +817,22 @@ new kakao.maps.Polyline({
 { "locationLinked": true, "cameraPermission": true, "locationPermission": true, "appleHealthLinked": true }
 ```
 
+### 7.4 알림 설정 변경
+
+`PATCH /users/me/notifications`
+
+**Request**
+
+```json
+{ "runningReminderTime": "07:00", "weeklyReportDay": "SUNDAY", "weeklyReportTime": "20:00" }
+```
+
+**Response 200**
+
+```json
+{ "runningReminderTime": "07:00", "weeklyReportDay": "SUNDAY", "weeklyReportTime": "20:00" }
+```
+
 ### 7.5 연동/권한 상태 갱신
 
 `PATCH /users/me/integrations`
@@ -854,21 +872,35 @@ new kakao.maps.Polyline({
 > }
 > ```
 
-### 7.4 알림 설정 변경
+### 7.6 회원 탈퇴
 
-`PATCH /users/me/notifications`
+`DELETE /users/me`
 
 **Request**
 
 ```json
-{ "runningReminderTime": "07:00", "weeklyReportDay": "SUNDAY", "weeklyReportTime": "20:00" }
+{ "password": "string" }
 ```
 
-**Response 200**
+**Response 204** — 본문 없음
 
-```json
-{ "runningReminderTime": "07:00", "weeklyReportDay": "SUNDAY", "weeklyReportTime": "20:00" }
-```
+> ⚠️ **되돌릴 수 없습니다.** 계정과 함께 목표·알림·연동상태·러닝 세션, 그리고 그에 딸린
+> 심박수 측정·회복 가이드까지 전부 삭제됩니다(DB `ON DELETE CASCADE`).
+> 클라이언트에서 확인 모달을 반드시 거치게 하세요.
+
+- **현재 비밀번호를 함께 보내야 합니다.** 탈취된 access 토큰만으로 계정이 삭제되면 안 되기 때문입니다.
+- 저장된 refresh 토큰도 함께 삭제되어 재발급이 막힙니다.
+- **이미 발급된 access 토큰은 만료 전까지 서명 자체는 유효합니다**(JWT는 취소 불가).
+  다만 사용자 행이 사라져 대부분의 API가 404 `E4040`으로 응답합니다.
+  클라이언트는 탈퇴 직후 저장소의 토큰 두 개를 모두 지우세요.
+
+**에러**
+
+| 상황 | 코드 |
+| --- | --- |
+| 비밀번호 불일치 | 401 `E4011` |
+| `password` 누락 | 400 `E4001` |
+| 토큰 없음 · 유효하지 않음 | 401 `E4010` |
 
 ---
 
@@ -941,7 +973,7 @@ new kakao.maps.Polyline({
 | 6. 심박수 확인(rPPG 안내) | 4.4, 4.5, 4.6 |
 | 7. 오늘의 회복 가이드 | 5.1, 5.2, 5.3 |
 | 8. 측정 기록 | 3.6, 3.7, 6.1, 6.2 |
-| 9. 프로필 | 7.1 ~ 7.5, 1.4 |
+| 9. 프로필 | 7.1 ~ 7.6, 1.4 |
 
 ## 부록 B. 참고 엔티티
 
