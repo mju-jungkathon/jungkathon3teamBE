@@ -21,6 +21,7 @@ import jungkathon3team.aftergrow.running.dto.RunningStartDto;
 import jungkathon3team.aftergrow.running.entity.Intensity;
 import jungkathon3team.aftergrow.running.service.RunningSessionService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -163,7 +164,15 @@ public class RunningSessionController {
             @AuthenticationPrincipal UUID userId,
             @PathVariable("id") UUID sessionId
     ) {
-        return ApiResponse.ok(recoveryGuideService.generate(userId, sessionId));
+        try {
+            return ApiResponse.ok(recoveryGuideService.generate(userId, sessionId));
+        } catch (DataIntegrityViolationException e) {
+            // 같은 세션에 거의 동시에 두 번 요청이 오면(React StrictMode의 useEffect 이중 마운트 등)
+            // 서비스의 "있으면 반환, 없으면 생성" 체크가 원자적이지 않아 두 번째 요청이 UNIQUE(running_session_id)
+            // 위반으로 죽는다. 실패한 트랜잭션은 이미 롤백됐으니, 새 트랜잭션으로 한 번 더 부르면
+            // 먼저 커밋된 가이드를 정상적으로 찾아 반환한다.
+            return ApiResponse.ok(recoveryGuideService.generate(userId, sessionId));
+        }
     }
 
     @Operation(summary = "세션 완료 & 리포트 확정",
