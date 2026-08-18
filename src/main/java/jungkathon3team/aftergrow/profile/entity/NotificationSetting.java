@@ -50,7 +50,7 @@ public class NotificationSetting {
     }
 
     /**
-     * R7 §7.4 부분 수정. null로 온(요청에서 생략된) 필드는 기존값을 유지한다.
+     * R7 §7.5 부분 수정. null로 온(요청에서 생략된) 필드는 기존값을 유지한다.
      */
     public void updatePartial(LocalTime runningReminderTime, DayOfWeek weeklyReportDay, LocalTime weeklyReportTime) {
         if (runningReminderTime != null) {

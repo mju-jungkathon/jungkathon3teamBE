@@ -183,7 +183,7 @@
 }
 ```
 
-> **가입 응답에 토큰이 포함됩니다.** 온보딩에서 곧바로 §7.2 `PATCH /users/me/goal`(운동 목적·주간 횟수)을
+> **가입 응답에 토큰이 포함됩니다.** 온보딩에서 곧바로 §7.3 `PATCH /users/me/goal`(운동 목적·주간 횟수)을
 > 불러야 하는데, 이 때문에 `POST /auth/login`을 한 번 더 호출할 필요가 없습니다.
 > `refreshToken`은 로그인과 동일하게 서버에 저장되어 로그아웃으로 즉시 무효화됩니다.
 >
@@ -532,6 +532,22 @@ if (routePath?.length) {
 | 남의 세션 | 403 `E4030` |
 | 없는 세션 / id가 UUID가 아님 | 404 `E4040` / 400 `E4001` |
 
+### 3.8 주간 러닝 횟수 조회
+
+`GET /running-sessions/weekly-count?date=2026-08-19`
+
+- 특정 화면에 종속되지 않은 범용 집계 엔드포인트입니다(홈 화면의 `weeklyRunCount`와 같은 로직을 공유하되,
+  임의의 주를 조회할 수 있다는 점이 다릅니다 — 예: 지난주 기록 캘린더).
+- `date`: **선택.** 조회하려는 주에 속한 아무 날짜(`YYYY-MM-DD`). 생략하면 오늘 기준 이번 주.
+- 주 기준은 월~일이며, "완료"는 §2.1과 동일하게 `ENDED` + `COMPLETED` 상태만 셉니다
+  (`IN_PROGRESS`는 제외).
+
+**Response 200**
+
+```json
+{ "weekStart": "2026-08-17", "weekEnd": "2026-08-23", "count": 3 }
+```
+
 ---
 
 ## R4. 심박수 측정 (화면 5, 6)
@@ -809,7 +825,21 @@ if (routePath?.length) {
 }
 ```
 
-### 7.2 목표 수정
+### 7.2 목표 조회
+
+`GET /users/me/goal`
+
+프로필 전체(§7.1)를 거치지 않고 목표만 단독으로 조회합니다. 응답 형태는 §7.3 수정 응답과 같습니다.
+
+**Response 200**
+
+```json
+{ "goalType": "FITNESS", "weeklyRunGoal": 5, "updatedAt": "2026-08-04T22:10:00+09:00" }
+```
+
+- 아직 목표를 설정한 적이 없으면 세 필드 모두 `null`입니다(에러가 아닙니다).
+
+### 7.3 목표 수정
 
 `PATCH /users/me/goal`
 
@@ -840,7 +870,7 @@ if (routePath?.length) {
 > `weeklyRunGoal`이 횟수 전용으로 확정됐기 때문입니다. `USER_GOALS`에 `weeklyDistanceGoalKm`를
 > 신설할지, 거리 목표 UI를 없앨지 팀 결정이 필요합니다. 현재는 후자(미구현)로 두었습니다.
 
-### 7.3 연동/권한 상태 조회
+### 7.4 연동/권한 상태 조회
 
 `GET /users/me/integrations`
 
@@ -854,7 +884,7 @@ if (routePath?.length) {
 > `false`만 내려갔고, 의미상으로도 `locationPermission`(브라우저 위치 권한)과 구분되지 않았습니다.
 > DB 컬럼은 남아 있으니 "위치 연동"이 권한과 다른 개념으로 정의되면 되살릴 수 있습니다.
 
-### 7.4 알림 설정 변경
+### 7.5 알림 설정 변경
 
 `PATCH /users/me/notifications`
 
@@ -870,7 +900,7 @@ if (routePath?.length) {
 { "runningReminderTime": "07:00", "weeklyReportDay": "SUNDAY", "weeklyReportTime": "20:00" }
 ```
 
-### 7.5 연동/권한 상태 갱신
+### 7.6 연동/권한 상태 갱신
 
 `PATCH /users/me/integrations`
 
@@ -880,7 +910,7 @@ if (routePath?.length) {
 { "cameraPermission": true, "locationPermission": false }
 ```
 
-**Response 200** — 7.3과 같은 형태
+**Response 200** — 7.4와 같은 형태
 
 ```json
 { "cameraPermission": true, "locationPermission": false, "appleHealthLinked": false }
@@ -909,7 +939,7 @@ if (routePath?.length) {
 > }
 > ```
 
-### 7.6 회원 탈퇴
+### 7.7 회원 탈퇴
 
 `DELETE /users/me`
 

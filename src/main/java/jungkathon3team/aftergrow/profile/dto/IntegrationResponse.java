@@ -3,7 +3,7 @@ package jungkathon3team.aftergrow.profile.dto;
 import jungkathon3team.aftergrow.profile.entity.IntegrationStatus;
 
 /**
- * R7 §7.3 GET /users/me/integrations 응답.
+ * R7 §7.4 GET /users/me/integrations 응답.
  *
  * <p><b>{@code locationLinked}는 응답에서 뺐다.</b> 값을 true로 만드는 경로가 어디에도 없어서
  * 항상 false만 내려가는 필드였고, 의미상으로도 {@code locationPermission}(브라우저 위치 권한)과

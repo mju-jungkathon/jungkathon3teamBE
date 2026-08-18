@@ -47,7 +47,7 @@ public class ProfileService {
         );
     }
 
-    /** GET /users/me/goal — 목표만 단독 조회. 설정 전이면 필드가 전부 null. */
+    /** 7.2 GET /users/me/goal — 목표만 단독 조회. 설정 전이면 필드가 전부 null. */
     public GoalUpdateDto.Response getGoal(UUID userId) {
         requireUser(userId);
         return userGoalRepository.findById(userId)
@@ -55,7 +55,7 @@ public class ProfileService {
                 .orElseGet(() -> new GoalUpdateDto.Response(null, null, null));
     }
 
-    /** 7.2 PATCH /users/me/goal */
+    /** 7.3 PATCH /users/me/goal */
     @Transactional
     public GoalUpdateDto.Response updateGoal(UUID userId, GoalUpdateDto.Request request) {
         requireUser(userId);
@@ -66,7 +66,7 @@ public class ProfileService {
         return GoalUpdateDto.Response.from(goal);
     }
 
-    /** 7.3 GET /users/me/integrations */
+    /** 7.4 GET /users/me/integrations */
     public IntegrationResponse getIntegrations(UUID userId) {
         requireUser(userId);
         return integrationStatusRepository.findById(userId)
@@ -76,7 +76,7 @@ public class ProfileService {
 
     /**
      * PATCH /users/me/integrations — 브라우저 권한 상태 동기화.
-     * <p>조회(7.3)만 있고 쓰기가 없어 cameraPermission/locationPermission을 갱신할 방법이 없던 공백을 메운다.
+     * <p>조회(7.4)만 있고 쓰기가 없어 cameraPermission/locationPermission을 갱신할 방법이 없던 공백을 메운다.
      */
     @Transactional
     public IntegrationResponse updateIntegrations(UUID userId, IntegrationUpdateDto.Request request) {
@@ -88,7 +88,7 @@ public class ProfileService {
         return IntegrationResponse.from(status);
     }
 
-    /** 7.4 PATCH /users/me/notifications */
+    /** 7.5 PATCH /users/me/notifications */
     @Transactional
     public NotificationUpdateDto.Response updateNotifications(UUID userId, NotificationUpdateDto.Request request) {
         requireUser(userId);

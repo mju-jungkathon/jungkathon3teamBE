@@ -179,7 +179,7 @@ public class RunningSessionService {
     }
 
     /**
-     * GET /running-sessions/weekly-count — 월~일 완료(ENDED+COMPLETED) 러닝 횟수.
+     * 3.8 GET /running-sessions/weekly-count — 월~일 완료(ENDED+COMPLETED) 러닝 횟수.
      * <p>{@code date}가 속한 주(월요일 시작)를 집계한다. 생략하면 오늘 기준 이번 주.
      */
     public WeeklyRunCountResponse getWeeklyRunCount(UUID userId, LocalDate date) {

@@ -15,8 +15,8 @@ import java.util.UUID;
 /**
  * integration_status 테이블 매핑. USERS와 1:1이며 {@code user_id}가 PK이자 FK.
  * <p>DB 컬럼이 모두 {@code NOT NULL DEFAULT false}라 필드는 원시 타입 {@code boolean}이다.
- * <p><b>두 도메인이 함께 쓴다.</b> R7(프로필/설정) §7.3은 조회만 하고 수정 API가 없으며,
- * 실제 값을 쓰는 쪽은 R4.3(애플 헬스 연동 기록)이다. R7이 "행이 없으면 전부 false로 응답"하는 것은
+ * <p><b>두 도메인이 함께 쓴다.</b> R7(프로필/설정) §7.4(조회)·§7.6(갱신)은 브라우저 권한 표시용 캐시만 다루고,
+ * {@code appleHealthLinked}를 실제로 켜는 쪽은 R4.3(애플 헬스 연동 기록)이다. R7이 "행이 없으면 전부 false로 응답"하는 것은
  * R4.3이 아직 행을 만들지 않았을 때의 동작이다.
  * <p>정적 팩토리가 둘인 이유는 <b>저장 여부</b>가 갈리기 때문이다 — {@link #defaults(UUID)}는 응답 전용이라
  * DB에 저장하지 않고, {@link #of(UUID)}는 곧 저장될 새 행이다. 만들어지는 객체 자체는 같다.
