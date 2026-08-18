@@ -18,6 +18,7 @@ import jungkathon3team.aftergrow.running.dto.RunningPrepareResponse;
 import jungkathon3team.aftergrow.running.dto.RunningSessionDetailResponse;
 import jungkathon3team.aftergrow.running.dto.RunningRecordsResponse;
 import jungkathon3team.aftergrow.running.dto.RunningStartDto;
+import jungkathon3team.aftergrow.running.dto.WeeklyRunCountResponse;
 import jungkathon3team.aftergrow.running.entity.Intensity;
 import jungkathon3team.aftergrow.running.service.RunningSessionService;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +27,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Tag(name = "러닝", description = "준비 / 진행 중 / 종료")
@@ -61,6 +63,17 @@ public class RunningSessionController {
             @RequestParam(required = false) String range
     ) {
         return ApiResponse.ok(runningSessionService.getRecords(userId, range));
+    }
+
+    @Operation(summary = "주간 러닝 횟수",
+            description = "월~일 기준 완료(ENDED+COMPLETED)된 러닝 횟수를 반환합니다. date는 그 주에 속한 아무 날짜나 되며, 생략하면 오늘 기준 이번 주입니다.")
+    @GetMapping("/weekly-count")
+    public ApiResponse<WeeklyRunCountResponse> weeklyRunCount(
+            @AuthenticationPrincipal UUID userId,
+            @Parameter(description = "조회할 주에 속한 날짜. 생략하면 이번 주.", example = "2026-08-19")
+            @RequestParam(required = false) LocalDate date
+    ) {
+        return ApiResponse.ok(runningSessionService.getWeeklyRunCount(userId, date));
     }
 
     /**

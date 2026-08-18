@@ -65,6 +65,29 @@ class ProfileApiTest {
     }
 
     @Test
+    void 설정이_없는_신규_유저의_목표_조회는_필드가_전부_null이다() throws Exception {
+        mockMvc.perform(get("/users/me/goal").header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.goalType").doesNotExist())
+                .andExpect(jsonPath("$.data.weeklyRunGoal").doesNotExist())
+                .andExpect(jsonPath("$.data.updatedAt").doesNotExist());
+    }
+
+    @Test
+    void 목표_조회는_저장된_값을_그대로_반환한다() throws Exception {
+        mockMvc.perform(patch("/users/me/goal")
+                        .header("Authorization", bearer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"goalType\":\"FITNESS\",\"weeklyRunGoal\":5}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/users/me/goal").header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.goalType").value("FITNESS"))
+                .andExpect(jsonPath("$.data.weeklyRunGoal").value(5));
+    }
+
+    @Test
     void 목표_최초_수정은_행을_생성하고_updatedAt을_채운다() throws Exception {
         mockMvc.perform(patch("/users/me/goal")
                         .header("Authorization", bearer)

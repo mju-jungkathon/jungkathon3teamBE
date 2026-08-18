@@ -20,7 +20,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import java.util.UUID;
 
@@ -297,6 +300,41 @@ class RunningSessionApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.records.length()").value(0))
                 .andExpect(jsonPath("$.data.summary.totalCount").value(0));
+    }
+
+    // --- 주간 러닝 횟수 ---
+
+    @Test
+    void 주간_러닝_횟수는_이번_주_월요일부터_일요일까지_완료된_세션만_센다() throws Exception {
+        LocalDate weekStart = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        ended(user, weekStart.atTime(7, 0), 3.0, 1200);
+        ended(user, weekStart.plusDays(2).atTime(7, 0), 3.0, 1200);
+        ended(user, weekStart.minusDays(1).atTime(7, 0), 3.0, 1200); // 지난 주 일요일 — 제외돼야 함
+        inProgress(user, weekStart.plusDays(1).atTime(7, 0)); // 진행 중 — 완료가 아니라 제외돼야 함
+
+        mockMvc.perform(get("/running-sessions/weekly-count").header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.weekStart").value(weekStart.toString()))
+                .andExpect(jsonPath("$.data.weekEnd").value(weekStart.plusDays(6).toString()))
+                .andExpect(jsonPath("$.data.count").value(2));
+    }
+
+    @Test
+    void 주간_러닝_횟수는_date_파라미터로_다른_주를_조회할_수_있다() throws Exception {
+        LocalDate lastWeekMonday = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(1);
+        ended(user, lastWeekMonday.atTime(7, 0), 3.0, 1200);
+
+        mockMvc.perform(get("/running-sessions/weekly-count").header("Authorization", bearer)
+                        .param("date", lastWeekMonday.plusDays(3).toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.weekStart").value(lastWeekMonday.toString()))
+                .andExpect(jsonPath("$.data.count").value(1));
+    }
+
+    @Test
+    void 주간_러닝_횟수_조회는_인증이_필요하다() throws Exception {
+        mockMvc.perform(get("/running-sessions/weekly-count"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

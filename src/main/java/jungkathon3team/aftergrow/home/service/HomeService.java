@@ -8,10 +8,11 @@ import jungkathon3team.aftergrow.heartrate.entity.HeartRateMeasurement;
 import jungkathon3team.aftergrow.heartrate.entity.SyncStatus;
 import jungkathon3team.aftergrow.heartrate.repository.HeartRateMeasurementRepository;
 import jungkathon3team.aftergrow.home.dto.HomeResponse;
-import jungkathon3team.aftergrow.profile.repository.UserGoalRepository;
+import jungkathon3team.aftergrow.profile.service.ProfileService;
 import jungkathon3team.aftergrow.running.entity.RunningStatus;
 import jungkathon3team.aftergrow.running.external.UvIndexClient;
 import jungkathon3team.aftergrow.running.repository.RunningSessionRepository;
+import jungkathon3team.aftergrow.running.service.RunningSessionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,7 +21,6 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.TemporalAdjusters;
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -32,16 +32,13 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class HomeService {
 
-    /** 이번 주 집계에 "완료"로 인정하는 상태. 러닝 종료(ENDED) 이후 리포트 확정(COMPLETED) 모두 포함. */
-    private static final List<RunningStatus> COMPLETED_STATUSES =
-            List.of(RunningStatus.ENDED, RunningStatus.COMPLETED);
-
     private static final String DEFAULT_NICKNAME = "러너";
 
     private final UserRepository userRepository;
-    private final UserGoalRepository userGoalRepository;
     private final RunningSessionRepository runningSessionRepository;
     private final HeartRateMeasurementRepository heartRateMeasurementRepository;
+    private final RunningSessionService runningSessionService;
+    private final ProfileService profileService;
 
     public HomeResponse getHome(UUID userId) {
         User user = userRepository.findById(userId)
@@ -52,12 +49,11 @@ public class HomeService {
         LocalDateTime weekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).atStartOfDay();
         LocalDateTime todayStart = today.atStartOfDay();
 
-        long weeklyRunCount = runningSessionRepository
-                .countByUser_UserIdAndStatusInAndStartedAtBetween(userId, COMPLETED_STATUSES, weekStart, now);
+        // 주간 횟수/목표는 각각 러닝·프로필 도메인이 소유한 로직(weekly-count 엔드포인트, 목표 조회)을 그대로 재사용한다.
+        long weeklyRunCount = runningSessionService.getWeeklyRunCount(userId, today).count();
 
-        int weeklyGoalCount = userGoalRepository.findById(userId)
-                .map(g -> g.getWeeklyRunGoal() == null ? 0 : g.getWeeklyRunGoal())
-                .orElse(0);
+        Integer weeklyRunGoal = profileService.getGoal(userId).weeklyRunGoal();
+        int weeklyGoalCount = weeklyRunGoal == null ? 0 : weeklyRunGoal;
         int remainingToGoal = Math.max(0, weeklyGoalCount - (int) weeklyRunCount);
 
         // 실패한 측정(avgBpm=null)이 최신이어도 건너뛰고, 그 이전의 성공한 측정으로 폴백한다.
@@ -90,7 +86,7 @@ public class HomeService {
 
     private HomeResponse.TodayRunningStatus resolveTodayStatus(UUID userId, LocalDateTime todayStart, LocalDateTime now) {
         boolean completedToday = runningSessionRepository
-                .existsByUser_UserIdAndStatusInAndStartedAtBetween(userId, COMPLETED_STATUSES, todayStart, now);
+                .existsByUser_UserIdAndStatusInAndStartedAtBetween(userId, RunningStatus.COMPLETED_STATUSES, todayStart, now);
         if (completedToday) {
             return HomeResponse.TodayRunningStatus.COMPLETED;
         }
@@ -104,13 +100,13 @@ public class HomeService {
 
     private HomeResponse.WeeklySummary buildWeeklySummary(UUID userId, LocalDateTime weekStart, LocalDateTime now) {
         double totalDistanceKm = runningSessionRepository
-                .sumDistanceKmBetween(userId, COMPLETED_STATUSES, weekStart, now);
+                .sumDistanceKmBetween(userId, RunningStatus.COMPLETED_STATUSES, weekStart, now);
 
         Double avgBpmRaw = heartRateMeasurementRepository.avgBpmBetween(userId, weekStart, now);
         Integer avgBpm = avgBpmRaw == null ? null : (int) Math.round(avgBpmRaw);
 
         Double avgUvRaw = runningSessionRepository
-                .avgUvIndexBetween(userId, COMPLETED_STATUSES, weekStart, now);
+                .avgUvIndexBetween(userId, RunningStatus.COMPLETED_STATUSES, weekStart, now);
         String cumulativeUvLevel = avgUvRaw == null
                 ? null
                 : UvIndexClient.UvIndexResult.of((int) Math.round(avgUvRaw)).uvLevel();
