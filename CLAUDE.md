@@ -166,6 +166,14 @@ jungkathon3team.aftergrow
 
 `@EnableJpaAuditing`은 쓰지 않습니다. `createdAt`은 `@PrePersist` 수동 방식이고, 그 외 시각 필드(`startedAt`, `measuredAt`, `updatedAt`)는 호출자/DTO가 넘긴 값을 그대로 저장합니다.
 
+> ⚠️ **오프셋이 없다는 건 "서버 타임존 = KST"라는 가정에 기대고 있다는 뜻입니다.** 클라이언트는 `startedAt`/`measuredAt`을
+> KST 벽시계 값 그대로 보내고, `HomeService`의 주간 집계(`weekStart`~`now`)도 `LocalDateTime.now()`로 같은 가정을 씁니다.
+> `Dockerfile`에 `ENV TZ=Asia/Seoul`(+ `-Duser.timezone=Asia/Seoul`)로 고정해 뒀는데, 이게 없으면 `eclipse-temurin` 이미지
+> 기본값(UTC)으로 뜨는 컨테이너의 `now()`가 KST보다 9시간 느려져 **오전 9시(KST) 이후에 한 러닝이 서버 기준 "아직 안 지난
+> 미래"로 밀려나 주간 집계에서 통째로 빠집니다.** 로컬 Windows 개발 환경은 OS 시간대가 이미 KST라 재현되지 않고, CI도
+> 테스트 데이터 생성과 검증이 같은 프로세스의 `now()`를 함께 쓰므로(절대 시간이 아니라 상대 비교) 잡히지 않습니다 —
+> 배포 환경에서만 터지는 유형입니다. 컨테이너 타임존을 건드릴 일이 있으면 이 설정을 지우지 마세요.
+
 ### 공통 응답·에러
 
 `common/`은 구현됐습니다 — `ApiResponse<T>`/`ApiError`, `ErrorCode` enum, `BusinessException`, `GlobalExceptionHandler`, `SecurityExceptionHandler`, `SecurityConfig`(+ `PasswordEncoder` 빈).
