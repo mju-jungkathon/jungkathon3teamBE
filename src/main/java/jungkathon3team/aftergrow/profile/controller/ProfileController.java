@@ -42,6 +42,12 @@ public class ProfileController {
         return ApiResponse.ok(profileService.getProfile(userId));
     }
 
+    @Operation(summary = "목표 조회", description = "설정한 적 없으면 필드가 전부 null입니다.")
+    @GetMapping("/goal")
+    public ApiResponse<GoalUpdateDto.Response> getGoal(@AuthenticationPrincipal UUID userId) {
+        return ApiResponse.ok(profileService.getGoal(userId));
+    }
+
     @Operation(summary = "목표 수정", description = "부분 수정 — 보낸 필드만 변경됩니다.")
     @PatchMapping("/goal")
     public ApiResponse<GoalUpdateDto.Response> updateGoal(

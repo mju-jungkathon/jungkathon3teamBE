@@ -47,6 +47,14 @@ public class ProfileService {
         );
     }
 
+    /** GET /users/me/goal — 목표만 단독 조회. 설정 전이면 필드가 전부 null. */
+    public GoalUpdateDto.Response getGoal(UUID userId) {
+        requireUser(userId);
+        return userGoalRepository.findById(userId)
+                .map(GoalUpdateDto.Response::from)
+                .orElseGet(() -> new GoalUpdateDto.Response(null, null, null));
+    }
+
     /** 7.2 PATCH /users/me/goal */
     @Transactional
     public GoalUpdateDto.Response updateGoal(UUID userId, GoalUpdateDto.Request request) {

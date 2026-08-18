@@ -20,8 +20,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import jungkathon3team.aftergrow.common.request.RangeParam;
 
+import java.time.DayOfWeek;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -173,6 +176,21 @@ public class RunningSessionService {
                 sessions.size(),
                 Math.round(totalDistanceKm * 100) / 100.0,
                 totalDurationSec);
+    }
+
+    /**
+     * GET /running-sessions/weekly-count — 월~일 완료(ENDED+COMPLETED) 러닝 횟수.
+     * <p>{@code date}가 속한 주(월요일 시작)를 집계한다. 생략하면 오늘 기준 이번 주.
+     */
+    public WeeklyRunCountResponse getWeeklyRunCount(UUID userId, LocalDate date) {
+        LocalDate base = date == null ? LocalDate.now() : date;
+        LocalDate weekStart = base.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        LocalDate weekEnd = weekStart.plusDays(6);
+
+        long count = runningSessionRepository.countByUser_UserIdAndStatusInAndStartedAtBetween(
+                userId, RunningStatus.COMPLETED_STATUSES, weekStart.atStartOfDay(), weekEnd.plusDays(1).atStartOfDay());
+
+        return new WeeklyRunCountResponse(weekStart, weekEnd, count);
     }
 
     /** GET /running-sessions/{id} — 상세. routePath(지도용 좌표 배열)는 여기에만 실린다. */
