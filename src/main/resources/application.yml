@@ -4,6 +4,12 @@ spring:
   profiles:
     active: local
 
+# 배포 환경은 nginx가 TLS를 종료하고 8080으로 평문 프록시한다. 이 값이 없으면
+# request.getScheme()이 항상 http로 보여, 브라우저가 보낸 Origin(https)과 어긋나
+# 완전한 동일 출처 요청까지 CORS 대상으로 오판해 차단한다(Swagger 로그인 403 원인).
+server:
+  forward-headers-strategy: framework
+
 openai:
   api-key: ${OPENAI_API_KEY:}
   model: ${OPENAI_MODEL:gpt-4o-mini}
