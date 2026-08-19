@@ -15,7 +15,8 @@ public class CorsConfig {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(List.of(
                 "http://localhost:5173",
-                "https://aftergrow.duckdns.org" // Swagger UI 자체도 이 도메인에서 서빙됨
+                "https://aftergrow.duckdns.org", // Swagger UI 자체도 이 도메인에서 서빙됨
+                "http://aftergrow.vercel.app/"
         ));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
