@@ -31,7 +31,8 @@ public class RecoveryGuideController {
     }
 
     @Operation(summary = "다음 러닝 추천 시점",
-            description = "회복 완료 예상 시각 이후 UV 지수가 낮은 시간대를 추천합니다. 추천 불가 시 recommendedTime은 null입니다.")
+            description = "회복 완료 예상 시각 이후 UV 지수가 낮은 시간대를 구간(연속 시간대 묶음)으로 추천합니다. "
+                    + "추천 불가 시 recommendedRanges는 빈 배열입니다.")
     @GetMapping("/{id}/next-run-suggestion")
     public ApiResponse<NextRunSuggestionResponse> nextRunSuggestion(
             @AuthenticationPrincipal UUID userId,
