@@ -44,16 +44,20 @@ public class UvForecastService {
     private final ObjectMapper objectMapper;
 
     public UvForecastResponse getTodayForecast(double lat, double lng) {
+        return getForecast(lat, lng, LocalDate.now());
+    }
+
+    /** 회복 가이드의 다음 러닝 추천 시점 계산처럼, 오늘이 아닌 날짜의 예보가 필요할 때 쓴다. */
+    public UvForecastResponse getForecast(double lat, double lng, LocalDate date) {
         String areaNo = areaCodeResolver.resolve(lat, lng);
-        LocalDate today = LocalDate.now();
-        String cacheKey = CACHE_KEY_PREFIX + areaNo + ":" + today;
+        String cacheKey = CACHE_KEY_PREFIX + areaNo + ":" + date;
 
         List<UvForecastClient.HourlyUv> cached = readCache(cacheKey);
         if (cached != null) {
             return new UvForecastResponse(cached);
         }
 
-        List<UvForecastClient.HourlyUv> hourly = uvForecastClient.fetchDailyForecast(areaNo, today);
+        List<UvForecastClient.HourlyUv> hourly = uvForecastClient.fetchDailyForecast(areaNo, date);
         writeCache(cacheKey, hourly);
         return new UvForecastResponse(hourly);
     }

@@ -44,6 +44,8 @@
 
 • `POST /recovery-guides/{id}/cooldown-timer/start`
 
+• `GET /recovery-guides/{id}/next-run-suggestion`
+
 • `POST /running-sessions/{id}/complete` |
 | **8** | **측정 기록** | • `GET /running-sessions?range=30d` *(러닝 기록 목록)*
 
@@ -737,6 +739,26 @@ if (routePath?.length) {
   "status": "COMPLETED",
   "reportId": "uuid"
 }
+```
+
+### 5.4 다음 러닝 추천 시점
+
+`GET /recovery-guides/{recoveryGuideId}/next-run-suggestion`
+
+- 추천 시점 = 회복 완료 예상 시각(`createdAt + cooldownTimerSec`) 이후 & UV 지수가 "낮음"(≤2)인 첫 시간대
+- 오늘/내일 예보(최대 48시간) 안에서 탐색. 위치 정보가 없거나, UV 예보 조회가 실패하거나, 적합한 시간대가 없으면
+  셋 다 동일하게 `recommendedTime: null` + 안내 메시지로 degrade(원인별 문구 구분 없음)
+
+**Response 200 (추천 가능)**
+
+```json
+{ "recommendedTime": "2026-08-21T07:00:00", "reason": "회복 완료 예상 시각 이후, UV 지수가 낮은 시간대", "expectedUvIndex": 1 }
+```
+
+**Response 200 (추천 불가 — graceful degradation)**
+
+```json
+{ "recommendedTime": null, "reason": "다음 러닝 추천 시간대를 계산할 수 없어요. 회복 완료 후 다시 확인해주세요.", "expectedUvIndex": null }
 ```
 
 ---

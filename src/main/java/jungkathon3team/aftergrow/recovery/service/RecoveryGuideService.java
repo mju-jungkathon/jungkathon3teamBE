@@ -5,18 +5,25 @@ import jungkathon3team.aftergrow.common.exception.ErrorCode;
 import jungkathon3team.aftergrow.heartrate.entity.SyncStatus;
 import jungkathon3team.aftergrow.heartrate.repository.HeartRateMeasurementRepository;
 import jungkathon3team.aftergrow.recovery.dto.CooldownTimerStartResponse;
+import jungkathon3team.aftergrow.recovery.dto.NextRunSuggestionResponse;
 import jungkathon3team.aftergrow.recovery.dto.RecoveryGuideResponse;
 import jungkathon3team.aftergrow.recovery.dto.RunningCompleteResponse;
 import jungkathon3team.aftergrow.recovery.entity.RecoveryGuide;
 import jungkathon3team.aftergrow.recovery.external.RecoveryGuideAiClient;
 import jungkathon3team.aftergrow.recovery.repository.RecoveryGuideRepository;
 import jungkathon3team.aftergrow.running.entity.RunningSession;
+import jungkathon3team.aftergrow.running.external.UvIndexClient.UvIndexResult;
 import jungkathon3team.aftergrow.running.repository.RunningSessionRepository;
+import jungkathon3team.aftergrow.weather.dto.UvForecastResponse;
+import jungkathon3team.aftergrow.weather.service.UvForecastService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -29,10 +36,15 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class RecoveryGuideService {
 
+    private static final String NO_SUGGESTION_MESSAGE =
+            "다음 러닝 추천 시간대를 계산할 수 없어요. 회복 완료 후 다시 확인해주세요.";
+    private static final String SUGGESTION_REASON = "회복 완료 예상 시각 이후, UV 지수가 낮은 시간대";
+
     private final RecoveryGuideRepository recoveryGuideRepository;
     private final RunningSessionRepository runningSessionRepository;
     private final HeartRateMeasurementRepository heartRateMeasurementRepository;
     private final RecoveryGuideAiClient recoveryGuideAiClient;
+    private final UvForecastService uvForecastService;
 
     /**
      * 5.1 POST /running-sessions/{id}/recovery-guide
@@ -96,6 +108,55 @@ public class RecoveryGuideService {
 
         return new RunningCompleteResponse(
                 session.getRunningSessionId(), session.getStatus(), guide.getRecoveryGuideId());
+    }
+
+    /**
+     * 5.4 GET /recovery-guides/{id}/next-run-suggestion
+     * <p>추천 시점 = 회복 완료 예상 시각(createdAt + cooldownTimerSec) 이후 & UV가 "낮음"(≤2, {@link UvIndexResult}
+     * 재사용)인 첫 시간대. 위치 정보가 없거나, KMA 예보 호출이 실패하거나, 48시간(오늘+내일) 안에 맞는 시간대가
+     * 없으면 셋 다 같은 안내 메시지로 degrade한다 — 원인별로 문구를 나누지 않기로 결정.
+     */
+    public NextRunSuggestionResponse getNextRunSuggestion(UUID userId, UUID recoveryGuideId) {
+        RecoveryGuide guide = getOwnedGuide(userId, recoveryGuideId);
+        RunningSession session = guide.getRunningSession();
+        Double lat = session.getLat();
+        Double lng = session.getLng();
+        if (lat == null || lng == null) {
+            return noSuggestion();
+        }
+
+        LocalDateTime recoveryCompleteAt = guide.getCreatedAt().plusSeconds(guide.getCooldownTimerSec());
+        return findLowUvSlot(lat, lng, recoveryCompleteAt)
+                .map(slot -> new NextRunSuggestionResponse(slot.time(), SUGGESTION_REASON, slot.uv()))
+                .orElseGet(this::noSuggestion);
+    }
+
+    private Optional<LowUvSlot> findLowUvSlot(double lat, double lng, LocalDateTime after) {
+        for (LocalDate date : List.of(after.toLocalDate(), after.toLocalDate().plusDays(1))) {
+            UvForecastResponse forecast;
+            try {
+                forecast = uvForecastService.getForecast(lat, lng, date);
+            } catch (BusinessException e) { // E5011 — 예보 실패는 못 찾은 것과 동일하게 degrade
+                return Optional.empty();
+            }
+
+            Optional<LowUvSlot> match = forecast.hourly().stream()
+                    .map(h -> new LowUvSlot(date.atTime(Integer.parseInt(h.hour()), 0), h.uv()))
+                    .filter(slot -> !slot.time().isBefore(after))
+                    .filter(slot -> "낮음".equals(UvIndexResult.of(slot.uv()).uvLevel()))
+                    .findFirst();
+            if (match.isPresent()) {
+                return match;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private NextRunSuggestionResponse noSuggestion() {
+        return new NextRunSuggestionResponse(null, NO_SUGGESTION_MESSAGE, null);
+    }
+
+    private record LowUvSlot(LocalDateTime time, int uv) {
     }
 
     private RecoveryGuide getOwnedGuide(UUID userId, UUID recoveryGuideId) {

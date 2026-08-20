@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jungkathon3team.aftergrow.common.response.ApiResponse;
 import jungkathon3team.aftergrow.recovery.dto.CooldownTimerStartResponse;
+import jungkathon3team.aftergrow.recovery.dto.NextRunSuggestionResponse;
 import jungkathon3team.aftergrow.recovery.service.RecoveryGuideService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -27,5 +28,15 @@ public class RecoveryGuideController {
             @PathVariable("id") UUID recoveryGuideId
     ) {
         return ApiResponse.ok(recoveryGuideService.startCooldownTimer(userId, recoveryGuideId));
+    }
+
+    @Operation(summary = "다음 러닝 추천 시점",
+            description = "회복 완료 예상 시각 이후 UV 지수가 낮은 시간대를 추천합니다. 추천 불가 시 recommendedTime은 null입니다.")
+    @GetMapping("/{id}/next-run-suggestion")
+    public ApiResponse<NextRunSuggestionResponse> nextRunSuggestion(
+            @AuthenticationPrincipal UUID userId,
+            @PathVariable("id") UUID recoveryGuideId
+    ) {
+        return ApiResponse.ok(recoveryGuideService.getNextRunSuggestion(userId, recoveryGuideId));
     }
 }

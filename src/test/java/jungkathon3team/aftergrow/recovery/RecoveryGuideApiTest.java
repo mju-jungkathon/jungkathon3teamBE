@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -186,6 +187,51 @@ class RecoveryGuideApiTest {
                 .andExpect(jsonPath("$.error.code").value("E4040"));
     }
 
+    @Test
+    void 다음_러닝_추천_시점은_회복완료_이후_UV가_낮은_시간대를_반환한다() throws Exception {
+        RunningSession session = endedSession(user, 5.0, Intensity.MODERATE, 4);
+        String guideId = generateGuideId(session);
+
+        mockMvc.perform(get("/recovery-guides/{id}/next-run-suggestion", guideId)
+                        .header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.recommendedTime").isNotEmpty())
+                .andExpect(jsonPath("$.data.reason").isNotEmpty())
+                .andExpect(jsonPath("$.data.expectedUvIndex").value(org.hamcrest.Matchers.lessThanOrEqualTo(2)));
+    }
+
+    @Test
+    void 위치_정보가_없는_세션이면_추천시점은_null이다() throws Exception {
+        RunningSession session = endedSessionWithoutLocation(user);
+        String guideId = generateGuideId(session);
+
+        mockMvc.perform(get("/recovery-guides/{id}/next-run-suggestion", guideId)
+                        .header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.recommendedTime").isEmpty())
+                .andExpect(jsonPath("$.data.expectedUvIndex").isEmpty())
+                .andExpect(jsonPath("$.data.reason").isNotEmpty());
+    }
+
+    @Test
+    void 남의_가이드로_추천시점을_조회하면_403_E4030() throws Exception {
+        RunningSession othersSession = endedSession(saveUser("other"), 5.0, Intensity.MODERATE, 4);
+        String othersGuideId = generateGuideId(othersSession, bearerOf(othersSession));
+
+        mockMvc.perform(get("/recovery-guides/{id}/next-run-suggestion", othersGuideId)
+                        .header("Authorization", bearer))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("E4030"));
+    }
+
+    @Test
+    void 존재하지_않는_가이드로_추천시점을_조회하면_404_E4040() throws Exception {
+        mockMvc.perform(get("/recovery-guides/{id}/next-run-suggestion", UUID.randomUUID())
+                        .header("Authorization", bearer))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("E4040"));
+    }
+
     // --- helpers ---
 
     private String generateGuideId(RunningSession session) throws Exception {
@@ -216,6 +262,13 @@ class RecoveryGuideApiTest {
         RunningSession session = RunningSession.start(
                 owner, LocalDateTime.now().minusMinutes(40), 37.5, 127.0, uvIndexAtStart);
         session.end(LocalDateTime.now(), 1800, distanceKm, intensity, null);
+        return runningSessionRepository.save(session);
+    }
+
+    private RunningSession endedSessionWithoutLocation(User owner) {
+        RunningSession session = RunningSession.start(
+                owner, LocalDateTime.now().minusMinutes(40), null, null, null);
+        session.end(LocalDateTime.now(), 1800, 5.0, Intensity.MODERATE, null);
         return runningSessionRepository.save(session);
     }
 }
