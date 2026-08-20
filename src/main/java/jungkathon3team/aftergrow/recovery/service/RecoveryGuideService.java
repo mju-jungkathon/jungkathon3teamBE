@@ -5,6 +5,7 @@ import jungkathon3team.aftergrow.common.exception.ErrorCode;
 import jungkathon3team.aftergrow.heartrate.entity.SyncStatus;
 import jungkathon3team.aftergrow.heartrate.repository.HeartRateMeasurementRepository;
 import jungkathon3team.aftergrow.recovery.dto.CooldownTimerStartResponse;
+import jungkathon3team.aftergrow.recovery.dto.LowUvTimeRange;
 import jungkathon3team.aftergrow.recovery.dto.NextRunSuggestionResponse;
 import jungkathon3team.aftergrow.recovery.dto.RecoveryGuideResponse;
 import jungkathon3team.aftergrow.recovery.dto.RunningCompleteResponse;
@@ -22,8 +23,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -113,8 +114,11 @@ public class RecoveryGuideService {
     /**
      * 5.4 GET /recovery-guides/{id}/next-run-suggestion
      * <p>추천 시점 = 회복 완료 예상 시각(createdAt + cooldownTimerSec) 이후 & UV가 "낮음"(≤2, {@link UvIndexResult}
-     * 재사용)인 첫 시간대. 위치 정보가 없거나, KMA 예보 호출이 실패하거나, 48시간(오늘+내일) 안에 맞는 시간대가
-     * 없으면 셋 다 같은 안내 메시지로 degrade한다 — 원인별로 문구를 나누지 않기로 결정.
+     * 재사용)인 시간대. 낱개 시각이 아니라 <b>연속된 낮은-UV 시간대를 구간으로 묶어</b> 돌려준다
+     * (예: 00,02,04,06시가 전부 낮음이면 하나의 00~06시 구간). 예보 격자가 항상 2시간 간격으로 빠짐없이
+     * 채워져 있어(오늘 22시 다음이 내일 00시) 오늘+내일 배열을 이어붙이기만 하면 자정을 넘는 구간도 자동으로 이어진다.
+     * <p>위치 정보가 없거나, KMA 예보 호출이 실패하거나, 48시간(오늘+내일) 안에 맞는 시간대가 없으면
+     * 셋 다 같은 안내 메시지 + 빈 배열로 degrade한다 — 원인별로 문구를 나누지 않기로 결정.
      */
     public NextRunSuggestionResponse getNextRunSuggestion(UUID userId, UUID recoveryGuideId) {
         RecoveryGuide guide = getOwnedGuide(userId, recoveryGuideId);
@@ -126,37 +130,62 @@ public class RecoveryGuideService {
         }
 
         LocalDateTime recoveryCompleteAt = guide.getCreatedAt().plusSeconds(guide.getCooldownTimerSec());
-        return findLowUvSlot(lat, lng, recoveryCompleteAt)
-                .map(slot -> new NextRunSuggestionResponse(slot.time(), SUGGESTION_REASON, slot.uv()))
-                .orElseGet(this::noSuggestion);
+        List<LowUvTimeRange> ranges = findLowUvRanges(lat, lng, recoveryCompleteAt);
+        return ranges.isEmpty() ? noSuggestion() : new NextRunSuggestionResponse(ranges, SUGGESTION_REASON);
     }
 
-    private Optional<LowUvSlot> findLowUvSlot(double lat, double lng, LocalDateTime after) {
+    private List<LowUvTimeRange> findLowUvRanges(double lat, double lng, LocalDateTime after) {
+        List<UvSlot> slots = new ArrayList<>();
         for (LocalDate date : List.of(after.toLocalDate(), after.toLocalDate().plusDays(1))) {
             UvForecastResponse forecast;
             try {
                 forecast = uvForecastService.getForecast(lat, lng, date);
             } catch (BusinessException e) { // E5011 — 예보 실패는 못 찾은 것과 동일하게 degrade
-                return Optional.empty();
+                return List.of();
             }
+            forecast.hourly().forEach(h ->
+                    slots.add(new UvSlot(date.atTime(Integer.parseInt(h.hour()), 0), h.uv())));
+        }
+        return groupLowUvRanges(slots, after);
+    }
 
-            Optional<LowUvSlot> match = forecast.hourly().stream()
-                    .map(h -> new LowUvSlot(date.atTime(Integer.parseInt(h.hour()), 0), h.uv()))
-                    .filter(slot -> !slot.time().isBefore(after))
-                    .filter(slot -> "낮음".equals(UvIndexResult.of(slot.uv()).uvLevel()))
-                    .findFirst();
-            if (match.isPresent()) {
-                return match;
+    /**
+     * 시간순 슬롯을 훑으며 회복 완료 이후 & "낮음" 구간만 연속으로 이어붙인다.
+     * <p>패키지 접근이라 {@code RecoveryGuideServiceTest}가 벽시계 시각과 무관하게 그룹핑 로직만 직접 검증한다.
+     */
+    static List<LowUvTimeRange> groupLowUvRanges(List<UvSlot> slots, LocalDateTime after) {
+        List<LowUvTimeRange> ranges = new ArrayList<>();
+        LocalDateTime rangeStart = null;
+        LocalDateTime rangeEnd = null;
+        int rangeMaxUv = 0;
+
+        for (UvSlot slot : slots) {
+            if (slot.time().isBefore(after)) {
+                continue;
+            }
+            boolean low = "낮음".equals(UvIndexResult.of(slot.uv()).uvLevel());
+            if (low) {
+                if (rangeStart == null) {
+                    rangeStart = slot.time();
+                }
+                rangeEnd = slot.time();
+                rangeMaxUv = Math.max(rangeMaxUv, slot.uv());
+            } else if (rangeStart != null) {
+                ranges.add(new LowUvTimeRange(rangeStart, rangeEnd, rangeMaxUv));
+                rangeStart = null;
             }
         }
-        return Optional.empty();
+        if (rangeStart != null) {
+            ranges.add(new LowUvTimeRange(rangeStart, rangeEnd, rangeMaxUv));
+        }
+        return ranges;
     }
 
     private NextRunSuggestionResponse noSuggestion() {
-        return new NextRunSuggestionResponse(null, NO_SUGGESTION_MESSAGE, null);
+        return new NextRunSuggestionResponse(List.of(), NO_SUGGESTION_MESSAGE);
     }
 
-    private record LowUvSlot(LocalDateTime time, int uv) {
+    record UvSlot(LocalDateTime time, int uv) {
     }
 
     private RecoveryGuide getOwnedGuide(UUID userId, UUID recoveryGuideId) {

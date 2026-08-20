@@ -188,28 +188,30 @@ class RecoveryGuideApiTest {
     }
 
     @Test
-    void 다음_러닝_추천_시점은_회복완료_이후_UV가_낮은_시간대를_반환한다() throws Exception {
+    void 다음_러닝_추천_시점은_회복완료_이후_UV가_낮은_시간대_구간을_반환한다() throws Exception {
         RunningSession session = endedSession(user, 5.0, Intensity.MODERATE, 4);
         String guideId = generateGuideId(session);
 
         mockMvc.perform(get("/recovery-guides/{id}/next-run-suggestion", guideId)
                         .header("Authorization", bearer))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.recommendedTime").isNotEmpty())
-                .andExpect(jsonPath("$.data.reason").isNotEmpty())
-                .andExpect(jsonPath("$.data.expectedUvIndex").value(org.hamcrest.Matchers.lessThanOrEqualTo(2)));
+                .andExpect(jsonPath("$.data.recommendedRanges").isNotEmpty())
+                .andExpect(jsonPath("$.data.recommendedRanges[0].startTime").isNotEmpty())
+                .andExpect(jsonPath("$.data.recommendedRanges[0].endTime").isNotEmpty())
+                .andExpect(jsonPath("$.data.recommendedRanges[0].expectedUvIndex")
+                        .value(org.hamcrest.Matchers.lessThanOrEqualTo(2)))
+                .andExpect(jsonPath("$.data.reason").isNotEmpty());
     }
 
     @Test
-    void 위치_정보가_없는_세션이면_추천시점은_null이다() throws Exception {
+    void 위치_정보가_없는_세션이면_추천구간은_빈_배열이다() throws Exception {
         RunningSession session = endedSessionWithoutLocation(user);
         String guideId = generateGuideId(session);
 
         mockMvc.perform(get("/recovery-guides/{id}/next-run-suggestion", guideId)
                         .header("Authorization", bearer))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.recommendedTime").isEmpty())
-                .andExpect(jsonPath("$.data.expectedUvIndex").isEmpty())
+                .andExpect(jsonPath("$.data.recommendedRanges").isEmpty())
                 .andExpect(jsonPath("$.data.reason").isNotEmpty());
     }
 

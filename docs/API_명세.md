@@ -745,20 +745,28 @@ if (routePath?.length) {
 
 `GET /recovery-guides/{recoveryGuideId}/next-run-suggestion`
 
-- 추천 시점 = 회복 완료 예상 시각(`createdAt + cooldownTimerSec`) 이후 & UV 지수가 "낮음"(≤2)인 첫 시간대
+- 추천 구간 = 회복 완료 예상 시각(`createdAt + cooldownTimerSec`) 이후, UV 지수가 "낮음"(≤2)인 시간대를
+  **연속으로 묶은 구간들**(예: UV가 0,0,1,2,4,6,2,1이면 00~06시·12~14시 두 구간)
 - 오늘/내일 예보(최대 48시간) 안에서 탐색. 위치 정보가 없거나, UV 예보 조회가 실패하거나, 적합한 시간대가 없으면
-  셋 다 동일하게 `recommendedTime: null` + 안내 메시지로 degrade(원인별 문구 구분 없음)
+  셋 다 동일하게 `recommendedRanges: []` + 안내 메시지로 degrade(원인별 문구 구분 없음)
+- `expectedUvIndex`는 구간 내 최댓값(가장 UV가 높았던 시각 기준, ≤2)
 
 **Response 200 (추천 가능)**
 
 ```json
-{ "recommendedTime": "2026-08-21T07:00:00", "reason": "회복 완료 예상 시각 이후, UV 지수가 낮은 시간대", "expectedUvIndex": 1 }
+{
+  "recommendedRanges": [
+    { "startTime": "2026-08-21T00:00:00", "endTime": "2026-08-21T06:00:00", "expectedUvIndex": 2 },
+    { "startTime": "2026-08-21T12:00:00", "endTime": "2026-08-21T14:00:00", "expectedUvIndex": 2 }
+  ],
+  "reason": "회복 완료 예상 시각 이후, UV 지수가 낮은 시간대"
+}
 ```
 
 **Response 200 (추천 불가 — graceful degradation)**
 
 ```json
-{ "recommendedTime": null, "reason": "다음 러닝 추천 시간대를 계산할 수 없어요. 회복 완료 후 다시 확인해주세요.", "expectedUvIndex": null }
+{ "recommendedRanges": [], "reason": "다음 러닝 추천 시간대를 계산할 수 없어요. 회복 완료 후 다시 확인해주세요." }
 ```
 
 ---
