@@ -745,21 +745,23 @@ if (routePath?.length) {
 
 `GET /recovery-guides/{recoveryGuideId}/next-run-suggestion`
 
-- 추천 구간 = 회복 완료 예상 시각(`createdAt + cooldownTimerSec`) 이후, UV 지수가 "낮음"(≤2)인 시간대를
-  **연속으로 묶은 구간들**(예: UV가 0,0,1,2,4,6,2,1이면 00~06시·12~14시 두 구간)
-- 오늘/내일 예보(최대 48시간) 안에서 탐색. 위치 정보가 없거나, UV 예보 조회가 실패하거나, 적합한 시간대가 없으면
-  셋 다 동일하게 `recommendedRanges: []` + 안내 메시지로 degrade(원인별 문구 구분 없음)
+- 추천 구간 = **강도별 최소 휴식일**(가이드가 생성된 날짜 기준 LOW +1일 / MODERATE +2일 / HIGH +3일) 이후,
+  UV 지수가 "낮음"(≤2)인 시간대를 **연속으로 묶은 구간들**(예: UV가 0,0,1,2,4,6,2,1이면 00~06시·12~14시 두 구간).
+  강도와 무관하게 **오늘은 항상 추천에서 제외**된다(`cooldownTimerSec`는 5.2 쿨다운 타이머 전용이라 이 계산에는 쓰이지 않음)
+- 휴식일 이후 이틀치 예보(최대 48시간) 안에서 탐색. 위치 정보가 없거나, UV 예보 조회가 실패하거나, 적합한 시간대가 없으면
+  셋 다 동일하게 `recommendedRanges: []` + 안내 메시지로 degrade(원인별 문구 구분 없음). 기상청 예보가 먼 미래일수록
+  누락되기 쉬워 HIGH(+3일)는 이 degrade 경로를 상대적으로 자주 탈 수 있다
 - `expectedUvIndex`는 구간 내 최댓값(가장 UV가 높았던 시각 기준, ≤2)
 
-**Response 200 (추천 가능)**
+**Response 200 (추천 가능, 예: 세션이 8/21에 종료되고 강도가 LOW인 경우)**
 
 ```json
 {
   "recommendedRanges": [
-    { "startTime": "2026-08-21T00:00:00", "endTime": "2026-08-21T06:00:00", "expectedUvIndex": 2 },
-    { "startTime": "2026-08-21T12:00:00", "endTime": "2026-08-21T14:00:00", "expectedUvIndex": 2 }
+    { "startTime": "2026-08-22T00:00:00", "endTime": "2026-08-22T06:00:00", "expectedUvIndex": 2 },
+    { "startTime": "2026-08-22T18:00:00", "endTime": "2026-08-23T06:00:00", "expectedUvIndex": 2 }
   ],
-  "reason": "회복 완료 예상 시각 이후, UV 지수가 낮은 시간대"
+  "reason": "강도별 최소 휴식일 이후, UV 지수가 낮은 시간대"
 }
 ```
 
