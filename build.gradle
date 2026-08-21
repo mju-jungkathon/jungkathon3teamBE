@@ -50,4 +50,8 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	// 운영 컨테이너(Dockerfile의 -Duser.timezone=Asia/Seoul)와 로컬 개발 환경(OS가 이미 KST)에 맞춰
+	// 테스트 JVM도 KST로 고정한다. GitHub Actions 러너 기본값(UTC)로 돌리면 LocalDateTime.now() 기준
+	// "오늘"을 검증하는 테스트가 KST 09시(=UTC 자정) 근처에 실행될 때만 날짜 경계를 넘어가며 실패한다.
+	jvmArgs '-Duser.timezone=Asia/Seoul'
 }
