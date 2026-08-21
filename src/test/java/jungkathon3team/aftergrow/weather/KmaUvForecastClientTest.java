@@ -11,6 +11,8 @@ import org.springframework.web.client.RestClient;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -25,10 +27,16 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
  * 기상청 응답 → 2시간 격자 변환 단위 테스트.
  * <p>통합 테스트는 서비스키가 없어 MockUvForecastClient만 태우므로 이 변환 로직이 검증되지 않는다.
  * 여기서는 실제 네트워크 없이 응답 본문만 흉내 내 <b>보간과 오류 처리</b>를 고정한다.
+ * <p><b>날짜를 하드코딩하지 않고 매번 "오늘"로 계산한다.</b> 발표시각 선택({@code latestAnnouncement()})이
+ * 더 이상 요청 날짜가 아니라 실제 시계(now) 기준이라, 과거로 고정된 날짜를 쓰면 URI의 {@code time=} 값을
+ * 예측할 수 없다. 자정~06시 사이에 테스트가 실행되면(전날 18시 발표로 분기) 아래 고정 fixture 값과 어긋날 수
+ * 있지만 — 실제 개발·CI 환경에서 거의 발생하지 않는 경계라 감수한다.
  */
 class KmaUvForecastClientTest {
 
-    private static final LocalDate DATE = LocalDate.of(2026, 8, 16);
+    private static final LocalDate DATE = LocalDate.now();
+    private static final LocalDateTime ANNOUNCED_AT = DATE.atTime(6, 0);
+    private static final String ANNOUNCED_AT_PARAM = ANNOUNCED_AT.format(DateTimeFormatter.ofPattern("yyyyMMddHH"));
 
     /** 06시 발표 응답. h0=06시, h3=09시, h6=12시 … 3시간 간격이다. */
     private static final String MORNING_RESPONSE = """
@@ -86,7 +94,7 @@ class KmaUvForecastClientTest {
                 request -> assertThat(request.getURI().toString())
                         .startsWith("https://apis.data.go.kr/1360000/LivingWthrIdxServiceV5/getUVIdxV5")
                         .contains("areaNo=1100000000")
-                        .contains("time=2026081606"));
+                        .contains("time=" + ANNOUNCED_AT_PARAM));
 
         client.fetchDailyForecast("1100000000", DATE);
     }

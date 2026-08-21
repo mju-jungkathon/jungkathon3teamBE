@@ -70,22 +70,26 @@ public class KmaUvForecastClient implements UvForecastClient {
 
     @Override
     public List<HourlyUv> fetchDailyForecast(String areaNo, LocalDate date) {
-        LocalDateTime announcedAt = latestAnnouncementOnOrBefore(date);
+        LocalDateTime announcedAt = latestAnnouncement();
         JsonNode item = requestItem(areaNo, announcedAt);
         return toTwoHourGrid(item, announcedAt, date);
     }
 
     /**
-     * 요청 날짜 06시 발표를 쓴다. 그 시각이 아직 오지 않았다면(오늘 새벽) 전날 18시 발표로 물러난다 —
-     * 아직 발표되지 않은 시각으로 조회하면 빈 응답이 온다.
+     * 가장 최근에 실제로 발표된 시각을 고른다(오늘 06시, 아직이면 전날 18시).
+     * <p><b>{@code date}가 아니라 항상 "지금(now)" 기준이어야 한다.</b> 한 번의 발표가 h0~h75(~3.1일)를
+     * 덮으므로, 모레·글피처럼 오늘보다 먼 날짜를 요청해도 같은(가장 최근) 발표로 커버된다. 예전에는 이 메서드가
+     * 요청 날짜 기준으로 발표시각을 계산해서, 오늘/내일까지는 우연히 맞았지만 그 이상을 요청하면 아직 발표되지
+     * 않은 미래 시각을 조회해 기상청이 {@code NO_DATA}를 돌려줬다 — 회복 가이드의 강도별 다음 러닝 추천
+     * (MODERATE +2일/HIGH +3일)이 그 버그를 처음으로 건드리면서 발견됐다.
      */
-    private LocalDateTime latestAnnouncementOnOrBefore(LocalDate date) {
+    private LocalDateTime latestAnnouncement() {
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime morning = date.atTime(ANNOUNCE_HOURS[0], 0);
-        if (!morning.isAfter(now)) {
-            return morning;
+        LocalDateTime todayMorning = now.toLocalDate().atTime(ANNOUNCE_HOURS[0], 0);
+        if (!todayMorning.isAfter(now)) {
+            return todayMorning;
         }
-        return date.minusDays(1).atTime(ANNOUNCE_HOURS[1], 0);
+        return now.toLocalDate().minusDays(1).atTime(ANNOUNCE_HOURS[1], 0);
     }
 
     /**

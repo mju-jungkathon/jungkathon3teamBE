@@ -12,6 +12,7 @@ import jungkathon3team.aftergrow.recovery.dto.RunningCompleteResponse;
 import jungkathon3team.aftergrow.recovery.entity.RecoveryGuide;
 import jungkathon3team.aftergrow.recovery.external.RecoveryGuideAiClient;
 import jungkathon3team.aftergrow.recovery.repository.RecoveryGuideRepository;
+import jungkathon3team.aftergrow.running.entity.Intensity;
 import jungkathon3team.aftergrow.running.entity.RunningSession;
 import jungkathon3team.aftergrow.running.external.UvIndexClient.UvIndexResult;
 import jungkathon3team.aftergrow.running.repository.RunningSessionRepository;
@@ -39,7 +40,7 @@ public class RecoveryGuideService {
 
     private static final String NO_SUGGESTION_MESSAGE =
             "다음 러닝 추천 시간대를 계산할 수 없어요. 회복 완료 후 다시 확인해주세요.";
-    private static final String SUGGESTION_REASON = "회복 완료 예상 시각 이후, UV 지수가 낮은 시간대";
+    private static final String SUGGESTION_REASON = "강도별 최소 휴식일 이후, UV 지수가 낮은 시간대";
 
     private final RecoveryGuideRepository recoveryGuideRepository;
     private final RunningSessionRepository runningSessionRepository;
@@ -113,12 +114,16 @@ public class RecoveryGuideService {
 
     /**
      * 5.4 GET /recovery-guides/{id}/next-run-suggestion
-     * <p>추천 시점 = 회복 완료 예상 시각(createdAt + cooldownTimerSec) 이후 & UV가 "낮음"(≤2, {@link UvIndexResult}
-     * 재사용)인 시간대. 낱개 시각이 아니라 <b>연속된 낮은-UV 시간대를 구간으로 묶어</b> 돌려준다
+     * <p>추천 시점 = 강도별 최소 휴식일({@link #restDaysFor}) 이후 & UV가 "낮음"(≤2, {@link UvIndexResult}
+     * 재사용)인 시간대. 휴식일은 가이드가 생성된 날짜(세션이 끝난 날) 기준으로 세므로, 강도와 무관하게
+     * 오늘은 항상 추천에서 제외된다 — {@code cooldownTimerSec}(2~10분)은 R5.2 타이머 UI 전용이라 이 계산에는
+     * 쓰지 않는다. 낱개 시각이 아니라 <b>연속된 낮은-UV 시간대를 구간으로 묶어</b> 돌려준다
      * (예: 00,02,04,06시가 전부 낮음이면 하나의 00~06시 구간). 예보 격자가 항상 2시간 간격으로 빠짐없이
-     * 채워져 있어(오늘 22시 다음이 내일 00시) 오늘+내일 배열을 이어붙이기만 하면 자정을 넘는 구간도 자동으로 이어진다.
-     * <p>위치 정보가 없거나, KMA 예보 호출이 실패하거나, 48시간(오늘+내일) 안에 맞는 시간대가 없으면
-     * 셋 다 같은 안내 메시지 + 빈 배열로 degrade한다 — 원인별로 문구를 나누지 않기로 결정.
+     * 채워져 있어(전날 22시 다음이 다음날 00시) 이틀치 배열을 이어붙이기만 하면 자정을 넘는 구간도 자동으로 이어진다.
+     * <p>위치 정보가 없거나, KMA 예보 호출이 실패하거나, 탐색 창(휴식일 이후 48시간) 안에 맞는 시간대가 없으면
+     * 셋 다 같은 안내 메시지 + 빈 배열로 degrade한다 — 원인별로 문구를 나누지 않기로 결정. KMA 예보는 발표시각
+     * 기준 최대 75시간(~3.1일) 앞까지만 주므로({@code KmaUvForecastClient} 참고), HIGH(+3일)는 탐색 창 뒤쪽
+     * 절반이 범위 밖이라 자주 이 degrade 경로를 탈 수 있다 — 의도된 동작이다.
      */
     public NextRunSuggestionResponse getNextRunSuggestion(UUID userId, UUID recoveryGuideId) {
         RecoveryGuide guide = getOwnedGuide(userId, recoveryGuideId);
@@ -129,9 +134,20 @@ public class RecoveryGuideService {
             return noSuggestion();
         }
 
-        LocalDateTime recoveryCompleteAt = guide.getCreatedAt().plusSeconds(guide.getCooldownTimerSec());
-        List<LowUvTimeRange> ranges = findLowUvRanges(lat, lng, recoveryCompleteAt);
+        LocalDateTime after = guide.getCreatedAt().toLocalDate()
+                .plusDays(restDaysFor(session.getIntensity()))
+                .atStartOfDay();
+        List<LowUvTimeRange> ranges = findLowUvRanges(lat, lng, after);
         return ranges.isEmpty() ? noSuggestion() : new NextRunSuggestionResponse(ranges, SUGGESTION_REASON);
+    }
+
+    /** 강도가 높을수록 다음 러닝까지 더 쉬어야 한다는 팀 결정(LOW +1일/MODERATE +2일/HIGH +3일). */
+    static int restDaysFor(Intensity intensity) {
+        return switch (intensity) {
+            case LOW -> 1;
+            case MODERATE -> 2;
+            case HIGH -> 3;
+        };
     }
 
     private List<LowUvTimeRange> findLowUvRanges(double lat, double lng, LocalDateTime after) {
