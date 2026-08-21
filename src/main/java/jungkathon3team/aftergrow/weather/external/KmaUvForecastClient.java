@@ -70,7 +70,18 @@ public class KmaUvForecastClient implements UvForecastClient {
 
     @Override
     public List<HourlyUv> fetchDailyForecast(String areaNo, LocalDate date) {
-        LocalDateTime announcedAt = latestAnnouncement();
+        return fetchDailyForecast(areaNo, date, LocalDateTime.now());
+    }
+
+    /**
+     * 테스트가 실제 시계(now)와 무관하게 발표시각 분기(오늘 06시 vs 전날 18시)를 둘 다 검증할 수 있도록
+     * {@code now}를 주입받는 진입점. 운영 코드는 위 2-인자 메서드를 통해 항상 {@link LocalDateTime#now()}로 호출한다.
+     * <p>CI 러너는 보통 UTC로 도는데, 한국 근무시간(KST 09~15시)이 UTC로는 00~06시라 "전날 18시" 분기가
+     * 실제로 자주 선택된다 — {@code now}를 하드코딩하지 않고 실제 시계에 맡기면 이 분기의 검증이 실행 시각에
+     * 따라 흔들린다.
+     */
+    public List<HourlyUv> fetchDailyForecast(String areaNo, LocalDate date, LocalDateTime now) {
+        LocalDateTime announcedAt = latestAnnouncement(now);
         JsonNode item = requestItem(areaNo, announcedAt);
         return toTwoHourGrid(item, announcedAt, date);
     }
@@ -83,8 +94,7 @@ public class KmaUvForecastClient implements UvForecastClient {
      * 않은 미래 시각을 조회해 기상청이 {@code NO_DATA}를 돌려줬다 — 회복 가이드의 강도별 다음 러닝 추천
      * (MODERATE +2일/HIGH +3일)이 그 버그를 처음으로 건드리면서 발견됐다.
      */
-    private LocalDateTime latestAnnouncement() {
-        LocalDateTime now = LocalDateTime.now();
+    private LocalDateTime latestAnnouncement(LocalDateTime now) {
         LocalDateTime todayMorning = now.toLocalDate().atTime(ANNOUNCE_HOURS[0], 0);
         if (!todayMorning.isAfter(now)) {
             return todayMorning;

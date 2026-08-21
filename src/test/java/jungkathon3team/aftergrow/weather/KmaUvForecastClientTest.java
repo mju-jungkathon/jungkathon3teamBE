@@ -12,7 +12,6 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -27,16 +26,15 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
  * 기상청 응답 → 2시간 격자 변환 단위 테스트.
  * <p>통합 테스트는 서비스키가 없어 MockUvForecastClient만 태우므로 이 변환 로직이 검증되지 않는다.
  * 여기서는 실제 네트워크 없이 응답 본문만 흉내 내 <b>보간과 오류 처리</b>를 고정한다.
- * <p><b>날짜를 하드코딩하지 않고 매번 "오늘"로 계산한다.</b> 발표시각 선택({@code latestAnnouncement()})이
- * 더 이상 요청 날짜가 아니라 실제 시계(now) 기준이라, 과거로 고정된 날짜를 쓰면 URI의 {@code time=} 값을
- * 예측할 수 없다. 자정~06시 사이에 테스트가 실행되면(전날 18시 발표로 분기) 아래 고정 fixture 값과 어긋날 수
- * 있지만 — 실제 개발·CI 환경에서 거의 발생하지 않는 경계라 감수한다.
+ * <p><b>{@code now}를 3-인자 {@code fetchDailyForecast}로 직접 주입한다.</b> 발표시각 선택이 실제 시계
+ * 기준이라 {@code LocalDateTime.now()}에 의존하면 CI 러너 타임존(보통 UTC)에 따라 분기가 흔들린다 —
+ * 한국 근무시간(KST 09~15시)이 UTC로는 자정~06시라 "전날 18시" 분기가 CI에서 오히려 자주 걸린다.
  */
 class KmaUvForecastClientTest {
 
-    private static final LocalDate DATE = LocalDate.now();
-    private static final LocalDateTime ANNOUNCED_AT = DATE.atTime(6, 0);
-    private static final String ANNOUNCED_AT_PARAM = ANNOUNCED_AT.format(DateTimeFormatter.ofPattern("yyyyMMddHH"));
+    private static final LocalDate DATE = LocalDate.of(2026, 8, 16);
+    /** 06시 발표 이후(모닝 분기)를 고정한다. */
+    private static final LocalDateTime MORNING_NOW = DATE.atTime(9, 0);
 
     /** 06시 발표 응답. h0=06시, h3=09시, h6=12시 … 3시간 간격이다. */
     private static final String MORNING_RESPONSE = """
@@ -46,11 +44,11 @@ class KmaUvForecastClientTest {
              "h21":"0","h24":"2","h27":"6"}]}}}}
             """;
 
-    private UvForecastClient clientReturning(String body) {
+    private KmaUvForecastClient clientReturning(String body) {
         return clientReturning(body, "test-key", anything());
     }
 
-    private UvForecastClient clientReturning(String body, String authKey, RequestMatcher matcher) {
+    private KmaUvForecastClient clientReturning(String body, String authKey, RequestMatcher matcher) {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer.bindTo(builder).build()
                 .expect(matcher)
@@ -66,37 +64,50 @@ class KmaUvForecastClientTest {
     @Test
     void 인증키를_이중_인코딩하지_않는다() {
         // 인코딩 키(%2B 포함)를 넣어도 전송되는 건 %2B여야 한다(%252B가 아니라).
-        UvForecastClient client = clientReturning(MORNING_RESPONSE, "abc%2Bdef%3D",
+        KmaUvForecastClient client = clientReturning(MORNING_RESPONSE, "abc%2Bdef%3D",
                 request -> {
                     String uri = request.getURI().toString();
                     assertThat(uri).contains("serviceKey=abc%2Bdef%3D");
                     assertThat(uri).doesNotContain("%252B");
                 });
 
-        client.fetchDailyForecast("1100000000", DATE);
+        client.fetchDailyForecast("1100000000", DATE, MORNING_NOW);
     }
 
     /** 디코딩 키(+, = 원문)를 넣어도 전송 시엔 인코딩돼야 한다. */
     @Test
     void 디코딩_키를_넣어도_인코딩해서_보낸다() {
-        UvForecastClient client = clientReturning(MORNING_RESPONSE, "abc+def=",
+        KmaUvForecastClient client = clientReturning(MORNING_RESPONSE, "abc+def=",
                 request -> {
                     String uri = request.getURI().toString();
                     assertThat(uri).contains("serviceKey=abc%2Bdef%3D");
                 });
 
-        client.fetchDailyForecast("1100000000", DATE);
+        client.fetchDailyForecast("1100000000", DATE, MORNING_NOW);
     }
 
     @Test
     void 요청_URI는_V5_엔드포인트를_가리킨다() {
-        UvForecastClient client = clientReturning(MORNING_RESPONSE, "k",
+        KmaUvForecastClient client = clientReturning(MORNING_RESPONSE, "k",
                 request -> assertThat(request.getURI().toString())
                         .startsWith("https://apis.data.go.kr/1360000/LivingWthrIdxServiceV5/getUVIdxV5")
                         .contains("areaNo=1100000000")
-                        .contains("time=" + ANNOUNCED_AT_PARAM));
+                        .contains("time=2026081606"));
 
-        client.fetchDailyForecast("1100000000", DATE);
+        client.fetchDailyForecast("1100000000", DATE, MORNING_NOW);
+    }
+
+    /**
+     * CI 러너는 보통 UTC라 KST 근무시간(09~15시)이 UTC로는 자정~06시다. 그 시간대에 조회하면
+     * "오늘 06시"가 아직 발표 전이라 "전날 18시" 발표로 물러나야 한다 — 이 분기를 직접 고정해서 검증한다.
+     */
+    @Test
+    void 발표_전_새벽에_조회하면_전날_18시_발표를_쓴다() {
+        LocalDateTime beforeMorningAnnouncement = DATE.atTime(3, 0);
+        KmaUvForecastClient client = clientReturning(MORNING_RESPONSE, "k",
+                request -> assertThat(request.getURI().toString()).contains("time=2026081518"));
+
+        client.fetchDailyForecast("1100000000", DATE, beforeMorningAnnouncement);
     }
 
     private Map<String, Integer> asMap(List<UvForecastClient.HourlyUv> hourly) {
@@ -107,7 +118,7 @@ class KmaUvForecastClientTest {
     @Test
     void 응답을_00시부터_2시간_간격_12개로_변환한다() {
         List<UvForecastClient.HourlyUv> hourly =
-                clientReturning(MORNING_RESPONSE).fetchDailyForecast("1100000000", DATE);
+                clientReturning(MORNING_RESPONSE).fetchDailyForecast("1100000000", DATE, MORNING_NOW);
 
         assertThat(hourly).hasSize(12);
         assertThat(hourly).extracting(UvForecastClient.HourlyUv::hour)
@@ -118,7 +129,7 @@ class KmaUvForecastClientTest {
     @Test
     void 발표시각과_겹치는_시간대는_기상청_값을_그대로_쓴다() {
         Map<String, Integer> uv = asMap(clientReturning(MORNING_RESPONSE)
-                .fetchDailyForecast("1100000000", DATE));
+                .fetchDailyForecast("1100000000", DATE, MORNING_NOW));
 
         assertThat(uv.get("06")).isEqualTo(2);  // h0
         assertThat(uv.get("12")).isEqualTo(9);  // h6
@@ -132,7 +143,7 @@ class KmaUvForecastClientTest {
     @Test
     void 격자에_없는_시간대는_양옆_격자값_사이를_선형_보간한다() {
         Map<String, Integer> uv = asMap(clientReturning(MORNING_RESPONSE)
-                .fetchDailyForecast("1100000000", DATE));
+                .fetchDailyForecast("1100000000", DATE, MORNING_NOW));
 
         // 06시=2, 09시=6 → 08시는 2/3 지점: 2 + 2/3*4 = 4.67 → 5
         assertThat(uv.get("08")).isEqualTo(5);
@@ -149,7 +160,7 @@ class KmaUvForecastClientTest {
     @Test
     void 알려진_구간_밖은_외삽하지_않고_0으로_둔다() {
         Map<String, Integer> uv = asMap(clientReturning(MORNING_RESPONSE)
-                .fetchDailyForecast("1100000000", DATE));
+                .fetchDailyForecast("1100000000", DATE, MORNING_NOW));
 
         // 06시(=2) 이전 — 2가 새어 나오면 안 된다
         assertThat(uv.get("00")).isZero();
@@ -161,7 +172,7 @@ class KmaUvForecastClientTest {
     @Test
     void 요청한_날짜_밖의_값은_버린다() {
         Map<String, Integer> uv = asMap(clientReturning(MORNING_RESPONSE)
-                .fetchDailyForecast("1100000000", DATE));
+                .fetchDailyForecast("1100000000", DATE, MORNING_NOW));
 
         // h24(다음날 06시)=2, h27(다음날 09시)=6 이 오늘 22시로 새지 않아야 한다
         assertThat(uv.get("22")).isZero();
@@ -170,11 +181,11 @@ class KmaUvForecastClientTest {
     /** 기상청은 인증 실패도 HTTP 200에 담아 주므로 resultCode를 봐야 한다. */
     @Test
     void resultCode가_00이_아니면_E5011() {
-        UvForecastClient client = clientReturning("""
+        KmaUvForecastClient client = clientReturning("""
                 {"response":{"header":{"resultCode":"30","resultMsg":"SERVICE_KEY_IS_NOT_REGISTERED_ERROR"}}}
                 """);
 
-        assertThatThrownBy(() -> client.fetchDailyForecast("1100000000", DATE))
+        assertThatThrownBy(() -> client.fetchDailyForecast("1100000000", DATE, MORNING_NOW))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("자외선 예보");
     }
@@ -182,9 +193,9 @@ class KmaUvForecastClientTest {
     /** 서비스키가 잘못되면 JSON이 아니라 XML 오류 문서가 오기도 한다. */
     @Test
     void JSON이_아닌_응답이면_E5011() {
-        UvForecastClient client = clientReturning("<OpenAPI_ServiceResponse><cmmMsgHeader/></OpenAPI_ServiceResponse>");
+        KmaUvForecastClient client = clientReturning("<OpenAPI_ServiceResponse><cmmMsgHeader/></OpenAPI_ServiceResponse>");
 
-        assertThatThrownBy(() -> client.fetchDailyForecast("1100000000", DATE))
+        assertThatThrownBy(() -> client.fetchDailyForecast("1100000000", DATE, MORNING_NOW))
                 .isInstanceOf(BusinessException.class);
     }
 
@@ -194,25 +205,25 @@ class KmaUvForecastClientTest {
      */
     @Test
     void 게이트웨이_거절_봉투도_E5011로_처리한다() {
-        UvForecastClient client = clientReturning("""
+        KmaUvForecastClient client = clientReturning("""
                 {"OpenAPI_ServiceResponse":{"cmmMsgHeader":{
                   "errMsg":"NO_OPENAPI_SERVICE_ERROR",
                   "returnAuthMsg":"해당 오픈API 서비스가 없거나 폐기됨",
                   "returnReasonCode":"12"}}}
                 """);
 
-        assertThatThrownBy(() -> client.fetchDailyForecast("1100000000", DATE))
+        assertThatThrownBy(() -> client.fetchDailyForecast("1100000000", DATE, MORNING_NOW))
                 .isInstanceOf(BusinessException.class);
     }
 
     @Test
     void 항목이_비어_있으면_E5011() {
-        UvForecastClient client = clientReturning("""
+        KmaUvForecastClient client = clientReturning("""
                 {"response":{"header":{"resultCode":"00","resultMsg":"NORMAL_SERVICE"},
                  "body":{"items":{"item":[]}}}}
                 """);
 
-        assertThatThrownBy(() -> client.fetchDailyForecast("1100000000", DATE))
+        assertThatThrownBy(() -> client.fetchDailyForecast("1100000000", DATE, MORNING_NOW))
                 .isInstanceOf(BusinessException.class);
     }
 }
