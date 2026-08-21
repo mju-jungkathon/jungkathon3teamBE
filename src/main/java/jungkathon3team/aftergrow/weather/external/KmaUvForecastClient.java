@@ -70,22 +70,36 @@ public class KmaUvForecastClient implements UvForecastClient {
 
     @Override
     public List<HourlyUv> fetchDailyForecast(String areaNo, LocalDate date) {
-        LocalDateTime announcedAt = latestAnnouncementOnOrBefore(date);
+        return fetchDailyForecast(areaNo, date, LocalDateTime.now());
+    }
+
+    /**
+     * 테스트가 실제 시계(now)와 무관하게 발표시각 분기(오늘 06시 vs 전날 18시)를 둘 다 검증할 수 있도록
+     * {@code now}를 주입받는 진입점. 운영 코드는 위 2-인자 메서드를 통해 항상 {@link LocalDateTime#now()}로 호출한다.
+     * <p>CI 러너는 보통 UTC로 도는데, 한국 근무시간(KST 09~15시)이 UTC로는 00~06시라 "전날 18시" 분기가
+     * 실제로 자주 선택된다 — {@code now}를 하드코딩하지 않고 실제 시계에 맡기면 이 분기의 검증이 실행 시각에
+     * 따라 흔들린다.
+     */
+    public List<HourlyUv> fetchDailyForecast(String areaNo, LocalDate date, LocalDateTime now) {
+        LocalDateTime announcedAt = latestAnnouncement(now);
         JsonNode item = requestItem(areaNo, announcedAt);
         return toTwoHourGrid(item, announcedAt, date);
     }
 
     /**
-     * 요청 날짜 06시 발표를 쓴다. 그 시각이 아직 오지 않았다면(오늘 새벽) 전날 18시 발표로 물러난다 —
-     * 아직 발표되지 않은 시각으로 조회하면 빈 응답이 온다.
+     * 가장 최근에 실제로 발표된 시각을 고른다(오늘 06시, 아직이면 전날 18시).
+     * <p><b>{@code date}가 아니라 항상 "지금(now)" 기준이어야 한다.</b> 한 번의 발표가 h0~h75(~3.1일)를
+     * 덮으므로, 모레·글피처럼 오늘보다 먼 날짜를 요청해도 같은(가장 최근) 발표로 커버된다. 예전에는 이 메서드가
+     * 요청 날짜 기준으로 발표시각을 계산해서, 오늘/내일까지는 우연히 맞았지만 그 이상을 요청하면 아직 발표되지
+     * 않은 미래 시각을 조회해 기상청이 {@code NO_DATA}를 돌려줬다 — 회복 가이드의 강도별 다음 러닝 추천
+     * (MODERATE +2일/HIGH +3일)이 그 버그를 처음으로 건드리면서 발견됐다.
      */
-    private LocalDateTime latestAnnouncementOnOrBefore(LocalDate date) {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime morning = date.atTime(ANNOUNCE_HOURS[0], 0);
-        if (!morning.isAfter(now)) {
-            return morning;
+    private LocalDateTime latestAnnouncement(LocalDateTime now) {
+        LocalDateTime todayMorning = now.toLocalDate().atTime(ANNOUNCE_HOURS[0], 0);
+        if (!todayMorning.isAfter(now)) {
+            return todayMorning;
         }
-        return date.minusDays(1).atTime(ANNOUNCE_HOURS[1], 0);
+        return now.toLocalDate().minusDays(1).atTime(ANNOUNCE_HOURS[1], 0);
     }
 
     /**

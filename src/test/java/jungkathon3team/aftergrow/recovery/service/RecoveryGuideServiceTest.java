@@ -2,6 +2,7 @@ package jungkathon3team.aftergrow.recovery.service;
 
 import jungkathon3team.aftergrow.recovery.dto.LowUvTimeRange;
 import jungkathon3team.aftergrow.recovery.service.RecoveryGuideService.UvSlot;
+import jungkathon3team.aftergrow.running.entity.Intensity;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
@@ -48,6 +49,13 @@ class RecoveryGuideServiceTest {
         List<LowUvTimeRange> ranges = RecoveryGuideService.groupLowUvRanges(slots, DATE.atStartOfDay());
 
         assertThat(ranges).isEmpty();
+    }
+
+    @Test
+    void 강도별_최소_휴식일은_LOW_1일_MODERATE_2일_HIGH_3일이다() {
+        assertThat(RecoveryGuideService.restDaysFor(Intensity.LOW)).isEqualTo(1);
+        assertThat(RecoveryGuideService.restDaysFor(Intensity.MODERATE)).isEqualTo(2);
+        assertThat(RecoveryGuideService.restDaysFor(Intensity.HIGH)).isEqualTo(3);
     }
 
     private List<UvSlot> slotsAt(int... uvByTwoHourStep) {
